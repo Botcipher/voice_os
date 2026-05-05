@@ -5,50 +5,141 @@ const { upsertLead, updateLeadStatus, assignToHuman } = require('./leadService')
 const { saveCall, getCallByRetellId } = require('./callService');
 const { getUpcomingAppointments, updateAppointmentStatus, getAppointmentByLead } = require('./appointmentService');
 const { createEvent } = require('./eventEngine');
+const { getSettings, updateSettings } = require('./settingsService');
 
 // ─────────────────────────────────────────────
-// RETELL WEBHOOK
+// INBOUND CALL WEBHOOK
+// Retell fires this when a call STARTS
+// We return dynamic variables to inject into the agent
 // ─────────────────────────────────────────────
 
-// POST /webhooks/retell
-// This is the main entry point — Retell fires this after every call
+router.post('/inbound-webhook', async (req, res) => {
+  const body = req.body;
+
+  const calledNumber =
+    body.to_number ||
+    body.called_number ||
+    body.agent?.phone_number ||
+    body.call?.to_number ||
+    null;
+
+  console.log('[Inbound] Call started. Called number:', calledNumber);
+  console.log('[Inbound] Full payload:', JSON.stringify(body, null, 2));
+
+  const safeDefaults = {
+    dynamic_variables: {
+      tenant_id: '',
+      business_name: 'Cool Air HVAC',
+      working_hours: 'Monday to Friday, 8:00 AM to 6:00 PM',
+      emergency_callback_minutes: '30',
+    },
+  };
+
+  if (!calledNumber) {
+    console.warn('[Inbound] No called number found — returning defaults');
+    return res.json(safeDefaults);
+  }
+
+  const { data: tenant, error: tenantError } = await supabase
+    .from('tenants')
+    .select('id, business_name, phone_number')
+    .eq('phone_number', calledNumber)
+    .single();
+
+  if (tenantError || !tenant) {
+    console.warn('[Inbound] No tenant found for number:', calledNumber, '— returning defaults');
+    return res.json(safeDefaults);
+  }
+
+  console.log('[Inbound] Tenant matched:', tenant.business_name, '| ID:', tenant.id);
+
+  const settings = await getSettings(tenant.id);
+
+  const workingDays = Array.isArray(settings.working_days)
+    ? settings.working_days.join(', ')
+    : 'Monday to Friday';
+  const workingHours = `${workingDays}, ${settings.working_hours_start || '8:00 AM'} to ${settings.working_hours_end || '6:00 PM'}`;
+
+  return res.json({
+    dynamic_variables: {
+      tenant_id: tenant.id,
+      business_name: settings.business_name || tenant.business_name,
+      working_hours: workingHours,
+      emergency_callback_minutes: String(settings.emergency_callback_minutes || '30'),
+    },
+  });
+});
+
+// ─────────────────────────────────────────────
+// POST CALL WEBHOOK
+// Retell fires this after every call ENDS
+// ─────────────────────────────────────────────
+
 router.post('/webhooks/retell', async (req, res) => {
   const body = req.body;
 
-  console.log('[Webhook] Retell payload received:', JSON.stringify(body, null, 2));
+  console.log('[Webhook] Post-call payload received:', JSON.stringify(body, null, 2));
 
-  // ── 1. Extract and normalize data from Retell payload
-  const tenantId = body.metadata?.tenant_id || body.tenant_id;
+  const tenantId =
+    body.call?.retell_llm_dynamic_variables?.tenant_id ||
+    body.metadata?.tenant_id ||
+    body.tenant_id ||
+    null;
 
   if (!tenantId) {
     return res.status(400).json({ error: 'Missing tenant_id in payload' });
   }
 
-  const phone = body.from_number || body.caller_number || body.metadata?.caller_number;
-  const name = body.metadata?.caller_name || body.caller_name || null;
+  const phone =
+    body.call?.from_number ||
+    body.from_number ||
+    body.caller_number ||
+    body.metadata?.caller_number ||
+    null;
+
+  const name =
+    body.call?.retell_llm_dynamic_variables?.caller_name ||
+    body.metadata?.caller_name ||
+    body.caller_name ||
+    null;
+
   const email = body.metadata?.caller_email || null;
   const jobType = body.metadata?.job_type || null;
   const urgency = body.metadata?.urgency || 'normal';
   const address = body.metadata?.address || null;
   const notes = body.metadata?.notes || null;
 
-  const retellCallId = body.call_id || body.retell_call_id;
-  const callStatus = body.call_status || 'answered';
-  const durationSeconds = body.duration_ms ? Math.round(body.duration_ms / 1000) : body.duration_seconds || 0;
-  const transcript = body.transcript || null;
+  const retellCallId = body.call_id || body.call?.call_id || body.retell_call_id || null;
+  const callStatus = body.call_status || body.call?.call_status || 'answered';
+  const durationMs = body.duration_ms || body.call?.duration_ms || 0;
+  const durationSeconds = durationMs ? Math.round(durationMs / 1000) : body.duration_seconds || 0;
+  const transcript = body.transcript || body.call?.transcript || null;
   const summary = body.call_analysis?.call_summary || body.summary || null;
-  const recordingUrl = body.recording_url || null;
-  const startedAt = body.start_timestamp ? new Date(body.start_timestamp).toISOString() : new Date().toISOString();
-  const endedAt = body.end_timestamp ? new Date(body.end_timestamp).toISOString() : new Date().toISOString();
+  const recordingUrl = body.recording_url || body.call?.recording_url || null;
+  const startedAt = body.start_timestamp
+    ? new Date(body.start_timestamp).toISOString()
+    : body.call?.start_timestamp
+    ? new Date(body.call.start_timestamp).toISOString()
+    : new Date().toISOString();
+  const endedAt = body.end_timestamp
+    ? new Date(body.end_timestamp).toISOString()
+    : body.call?.end_timestamp
+    ? new Date(body.call.end_timestamp).toISOString()
+    : new Date().toISOString();
 
-  const bookingMade = body.call_analysis?.custom_analysis_data?.booking_made || body.metadata?.booking_made || false;
-  const scheduledAt = body.call_analysis?.custom_analysis_data?.scheduled_at || body.metadata?.scheduled_at || null;
+  const bookingMade =
+    body.call_analysis?.custom_analysis_data?.booking_made ||
+    body.metadata?.booking_made ||
+    false;
+  const scheduledAt =
+    body.call_analysis?.custom_analysis_data?.scheduled_at ||
+    body.metadata?.scheduled_at ||
+    null;
 
   if (!phone) {
     return res.status(400).json({ error: 'Missing phone number in payload' });
   }
 
-  // ── 2. Guard against duplicate webhook calls
   if (retellCallId) {
     const existing = await getCallByRetellId(retellCallId);
     if (existing) {
@@ -57,10 +148,17 @@ router.post('/webhooks/retell', async (req, res) => {
     }
   }
 
-  // ── 3. Upsert lead
-  const { lead } = await upsertLead(tenantId, { phone, name, email, jobType, urgency, address, notes, source: 'call' });
+  const { lead } = await upsertLead(tenantId, {
+    phone,
+    name,
+    email,
+    jobType,
+    urgency,
+    address,
+    notes,
+    source: 'call',
+  });
 
-  // ── 4. Save call record
   await saveCall(tenantId, lead.id, {
     retell_call_id: retellCallId,
     call_status: callStatus,
@@ -72,13 +170,11 @@ router.post('/webhooks/retell', async (req, res) => {
     ended_at: endedAt,
   });
 
-  // ── 5. Fire the right event
   if (callStatus === 'failed' || callStatus === 'missed') {
     await createEvent(tenantId, lead.id, 'call_failed', { call_status: callStatus });
   } else if (bookingMade && scheduledAt) {
     await createEvent(tenantId, lead.id, 'appointment_booked', { scheduled_at: scheduledAt, lead });
   } else {
-    // Call completed but no booking
     await createEvent(tenantId, lead.id, 'call_completed', {});
     await createEvent(tenantId, lead.id, 'no_booking_after_call', {});
   }
@@ -87,10 +183,25 @@ router.post('/webhooks/retell', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// SETTINGS API
+// ─────────────────────────────────────────────
+
+router.get('/settings/:tenant_id', async (req, res) => {
+  const { tenant_id } = req.params;
+  const settings = await getSettings(tenant_id);
+  return res.json(settings);
+});
+
+router.put('/settings/:tenant_id', async (req, res) => {
+  const { tenant_id } = req.params;
+  const updated = await updateSettings(tenant_id, req.body);
+  return res.json({ settings: updated });
+});
+
+// ─────────────────────────────────────────────
 // DASHBOARD API
 // ─────────────────────────────────────────────
 
-// GET /dashboard/overview?tenant_id=xxx
 router.get('/dashboard/overview', async (req, res) => {
   const { tenant_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
@@ -118,7 +229,6 @@ router.get('/dashboard/overview', async (req, res) => {
   });
 });
 
-// GET /dashboard/leads?tenant_id=xxx&status=xxx&page=1
 router.get('/dashboard/leads', async (req, res) => {
   const { tenant_id, status, page = 1 } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
@@ -141,7 +251,6 @@ router.get('/dashboard/leads', async (req, res) => {
   return res.json({ leads: data, total: count, page: parseInt(page) });
 });
 
-// GET /dashboard/leads/:id — single lead with calls and appointments
 router.get('/dashboard/leads/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -160,7 +269,6 @@ router.get('/dashboard/leads/:id', async (req, res) => {
   });
 });
 
-// GET /dashboard/appointments?tenant_id=xxx
 router.get('/dashboard/appointments', async (req, res) => {
   const { tenant_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
@@ -169,7 +277,6 @@ router.get('/dashboard/appointments', async (req, res) => {
   return res.json({ appointments });
 });
 
-// PATCH /dashboard/appointments/:id — update status (reschedule / cancel)
 router.patch('/dashboard/appointments/:id', async (req, res) => {
   const { id } = req.params;
   const { status, calendar_event_id } = req.body;
@@ -180,14 +287,12 @@ router.patch('/dashboard/appointments/:id', async (req, res) => {
   return res.json({ appointment: updated });
 });
 
-// PATCH /dashboard/leads/:id/assign-human — stop AI, hand to human
 router.patch('/dashboard/leads/:id/assign-human', async (req, res) => {
   const { id } = req.params;
   const updated = await assignToHuman(id);
   return res.json({ lead: updated });
 });
 
-// GET /dashboard/conversations?tenant_id=xxx&lead_id=xxx
 router.get('/dashboard/conversations', async (req, res) => {
   const { tenant_id, lead_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
