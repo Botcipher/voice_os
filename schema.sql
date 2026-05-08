@@ -1,16 +1,22 @@
 -- ============================================
--- VOICE LEAD OS — SUPABASE SCHEMA
+-- VOICE LEAD OS — SUPABASE SCHEMA (FIXED)
 -- Run this entire file in Supabase SQL Editor
 -- ============================================
 
--- Enable UUID generation
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Drop existing tables cleanly (order matters due to foreign keys)
+DROP TABLE IF EXISTS messages CASCADE;
+DROP TABLE IF EXISTS conversations CASCADE;
+DROP TABLE IF EXISTS events CASCADE;
+DROP TABLE IF EXISTS appointments CASCADE;
+DROP TABLE IF EXISTS calls CASCADE;
+DROP TABLE IF EXISTS leads CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
 
 -- ─────────────────────────────────────────────
 -- TENANTS
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS tenants (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE tenants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_name TEXT NOT NULL,
   industry TEXT, -- hvac, plumbing, electrical
   phone_number TEXT,
@@ -22,8 +28,8 @@ CREATE TABLE IF NOT EXISTS tenants (
 -- ─────────────────────────────────────────────
 -- LEADS
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS leads (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE leads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
 
   name TEXT,
@@ -56,8 +62,8 @@ CREATE TABLE IF NOT EXISTS leads (
 -- ─────────────────────────────────────────────
 -- CALLS
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS calls (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE calls (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
 
@@ -78,8 +84,8 @@ CREATE TABLE IF NOT EXISTS calls (
 -- ─────────────────────────────────────────────
 -- APPOINTMENTS
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS appointments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE appointments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
 
@@ -95,8 +101,8 @@ CREATE TABLE IF NOT EXISTS appointments (
 -- ─────────────────────────────────────────────
 -- EVENTS (the brain)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS events (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
 
@@ -111,8 +117,8 @@ CREATE TABLE IF NOT EXISTS events (
 -- ─────────────────────────────────────────────
 -- CONVERSATIONS (call logs + future SMS)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS conversations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
 
@@ -129,8 +135,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- ─────────────────────────────────────────────
 -- MESSAGES (future SMS — ready now)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS messages (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
 
@@ -146,19 +152,19 @@ CREATE TABLE IF NOT EXISTS messages (
 -- ─────────────────────────────────────────────
 -- INDEXES (for query performance)
 -- ─────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_leads_tenant_id ON leads(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
-CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
-CREATE INDEX IF NOT EXISTS idx_calls_lead_id ON calls(lead_id);
-CREATE INDEX IF NOT EXISTS idx_calls_tenant_id ON calls(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_tenant_id ON appointments(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_lead_id ON appointments(lead_id);
-CREATE INDEX IF NOT EXISTS idx_events_lead_id ON events(lead_id);
-CREATE INDEX IF NOT EXISTS idx_events_processed ON events(processed);
+CREATE INDEX idx_leads_tenant_id ON leads(tenant_id);
+CREATE INDEX idx_leads_phone ON leads(phone);
+CREATE INDEX idx_leads_status ON leads(status);
+CREATE INDEX idx_calls_lead_id ON calls(lead_id);
+CREATE INDEX idx_calls_tenant_id ON calls(tenant_id);
+CREATE INDEX idx_appointments_tenant_id ON appointments(tenant_id);
+CREATE INDEX idx_appointments_lead_id ON appointments(lead_id);
+CREATE INDEX idx_events_lead_id ON events(lead_id);
+CREATE INDEX idx_events_processed ON events(processed);
 
 -- ─────────────────────────────────────────────
 -- SEED: Insert a test tenant to get started
 -- ─────────────────────────────────────────────
 INSERT INTO tenants (business_name, industry, phone_number, email, timezone)
 VALUES ('Test HVAC Co', 'hvac', '+15550000000', 'test@testhvac.com', 'America/New_York')
-ON CONFLICT DO NOTHING;
+
