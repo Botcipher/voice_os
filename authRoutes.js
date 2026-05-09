@@ -18,7 +18,8 @@ router.post('/login', async (req, res) => {
     .select('*')
     .eq('password_hash', hash)
     .eq('active', true)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   console.log('[Auth] User found:', !!user, '| Error:', error?.message || 'none');
 
