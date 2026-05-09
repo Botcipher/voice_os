@@ -21,7 +21,7 @@ async function getSettings(tenantId) {
 // Update settings — called from dashboard
 async function updateSettings(tenantId, updates) {
   const allowed = [
-    'business_name', 'business_email', 'business_phone', 'timezone',
+    'business_name', 'agent_name', 'business_email', 'business_phone', 'timezone',
     'sender_email', 'slot_duration_minutes', 'working_hours_start',
     'working_hours_end', 'working_days', 'emergency_keywords',
     'emergency_callback_minutes', 'calendar_id', 'notify_email'
@@ -51,6 +51,7 @@ function getDefaults(tenantId) {
   return {
     tenant_id: tenantId,
     business_name: 'Cool Air HVAC',
+    agent_name: 'Sarah',
     business_email: '',
     business_phone: '',
     timezone: 'America/New_York',
