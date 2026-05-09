@@ -415,7 +415,6 @@ router.get('/dashboard/conversations', requireAuth, async (req, res) => {
 
 // GET /dashboard/calls?tenant_id=xxx
 // Returns calls grouped by lead: [{ lead: {...}, calls: [...] }]
-// The Calls page opens a lead and shows all calls for that lead.
 router.get('/dashboard/calls', requireAuth, async (req, res) => {
   const { tenant_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
@@ -429,7 +428,6 @@ router.get('/dashboard/calls', requireAuth, async (req, res) => {
 
   if (error) throw error;
 
-  // Group calls by lead so the dashboard can show per-lead call history
   const leadsMap = new Map();
   for (const call of calls) {
     const leadId = call.lead_id;
