@@ -7,6 +7,7 @@ export default function LoginPage() {
   const { login } = useAuth()
   const router = useRouter()
   const [password, setPassword] = useState('')
+  const [show, setShow] = useState(false)
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -39,34 +40,62 @@ export default function LoginPage() {
         </p>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            autoFocus
-            style={{
-              background: '#fafafa',
-              border: `1px solid ${error ? '#dc2626' : '#ebebeb'}`,
-              borderRadius: 6,
-              color: '#0d0d0d',
-              fontSize: 13.5,
-              padding: '9px 12px',
-              width: '100%',
-              outline: 'none',
-              fontFamily: 'Inter, sans-serif',
-              transition: 'border-color 0.12s',
-            }}
-          />
+
+          {/* Password field with show/hide toggle */}
+          <div style={{ position: 'relative' }}>
+            <input
+              type={show ? 'text' : 'password'}
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              autoFocus
+              style={{
+                background: '#fafafa',
+                border: `1px solid ${error ? '#dc2626' : '#ebebeb'}`,
+                borderRadius: 6,
+                color: '#0d0d0d',
+                fontSize: 13.5,
+                padding: '9px 40px 9px 12px',
+                width: '100%',
+                outline: 'none',
+                fontFamily: 'Inter, sans-serif',
+                transition: 'border-color 0.12s',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShow(s => !s)}
+              style={{
+                position: 'absolute',
+                right: 10,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 4,
+                color: '#8c8c8c',
+                fontSize: 13,
+                fontFamily: 'Inter, sans-serif',
+                userSelect: 'none',
+              }}
+            >
+              {show ? 'Hide' : 'Show'}
+            </button>
+          </div>
+
           {error && (
             <p style={{ fontSize: 12, color: '#dc2626', letterSpacing: '-0.01em' }}>
               Incorrect password. Try again.
             </p>
           )}
+
           <button type="submit" disabled={loading || !password} style={{
             background: '#0d0d0d', color: '#fff', border: 'none',
             borderRadius: 6, padding: '9px 0',
-            fontSize: 13, fontWeight: 500, cursor: loading || !password ? 'not-allowed' : 'pointer',
+            fontSize: 13, fontWeight: 500,
+            cursor: loading || !password ? 'not-allowed' : 'pointer',
             opacity: loading || !password ? 0.35 : 1,
             fontFamily: 'Inter, sans-serif', transition: 'opacity 0.12s',
             letterSpacing: '-0.01em',

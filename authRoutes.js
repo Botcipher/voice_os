@@ -3,16 +3,15 @@ const router = express.Router();
 const crypto = require('crypto');
 const supabase = require('./supabase');
 
-// Simple token store — tokens are random strings stored in Supabase users table
-// Token expires after 7 days
-
-// POST /auth/login
-router.post('/auth/login', async (req, res) => {
+// POST /auth/login  (mounted at /auth in server.js, so just /login here)
+router.post('/login', async (req, res) => {
   const { password } = req.body;
+  console.log('[Auth] Login attempt received');
+
   if (!password) return res.status(400).json({ error: 'Missing password' });
 
-  // Look up user by password hash
   const hash = crypto.createHash('sha256').update(password).digest('hex');
+  console.log('[Auth] Password hash:', hash);
 
   const { data: user, error } = await supabase
     .from('users')
@@ -21,26 +20,29 @@ router.post('/auth/login', async (req, res) => {
     .eq('active', true)
     .single();
 
+  console.log('[Auth] User found:', !!user, '| Error:', error?.message || 'none');
+
   if (error || !user) {
     return res.status(401).json({ error: 'Incorrect password' });
   }
 
-  // Generate a session token
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  await supabase.from('sessions').insert({
+  const { error: sessionError } = await supabase.from('sessions').insert({
     user_id: user.id,
     token,
     expires_at: expiresAt,
   });
 
-  console.log(`[Auth] Login successful for tenant: ${user.tenant_id}`);
+  console.log('[Auth] Session created:', !sessionError, sessionError?.message || '');
+  console.log('[Auth] Login successful for tenant:', user.tenant_id);
+
   return res.json({ token, tenant_id: user.tenant_id });
 });
 
-// GET /auth/verify — called on every dashboard load to check token
-router.get('/auth/verify', async (req, res) => {
+// GET /auth/verify
+router.get('/verify', async (req, res) => {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'No token' });
 
@@ -59,7 +61,7 @@ router.get('/auth/verify', async (req, res) => {
 });
 
 // POST /auth/logout
-router.post('/auth/logout', async (req, res) => {
+router.post('/logout', async (req, res) => {
   const auth = req.headers.authorization;
   if (auth?.startsWith('Bearer ')) {
     const token = auth.slice(7);
