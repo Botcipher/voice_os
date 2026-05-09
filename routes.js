@@ -8,6 +8,19 @@ const { createEvent } = require('./eventEngine');
 const { getSettings, updateSettings } = require('./settingsService');
 
 // ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+const { requireAuth } = require('./middleware');
+
+// Returns true only if value is a valid UUID v4 string.
+// Used to guard :id and :tenant_id params so a Next.js prefetch file
+// like "index.txt" can never reach Supabase and cause a type error.
+function isUUID(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+// ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
 
@@ -281,7 +294,7 @@ router.post('/webhooks/retell', async (req, res) => {
 // ─────────────────────────────────────────────
 
 // GET /dashboard/overview?tenant_id=xxx
-router.get('/dashboard/overview', async (req, res) => {
+router.get('/dashboard/overview', requireAuth, async (req, res) => {
   const { tenant_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
 
@@ -311,7 +324,7 @@ router.get('/dashboard/overview', async (req, res) => {
 });
 
 // GET /dashboard/leads?tenant_id=xxx&status=xxx&page=1
-router.get('/dashboard/leads', async (req, res) => {
+router.get('/dashboard/leads', requireAuth, async (req, res) => {
   const { tenant_id, status, page = 1 } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
 
@@ -334,8 +347,9 @@ router.get('/dashboard/leads', async (req, res) => {
 });
 
 // GET /dashboard/leads/:id — single lead with calls and appointments
-router.get('/dashboard/leads/:id', async (req, res) => {
+router.get('/dashboard/leads/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
+  if (!isUUID(id)) return res.status(400).json({ error: 'Invalid lead id' });
 
   const [lead, calls, appointment] = await Promise.all([
     supabase.from('leads').select('*').eq('id', id).single(),
@@ -353,7 +367,7 @@ router.get('/dashboard/leads/:id', async (req, res) => {
 });
 
 // GET /dashboard/appointments?tenant_id=xxx
-router.get('/dashboard/appointments', async (req, res) => {
+router.get('/dashboard/appointments', requireAuth, async (req, res) => {
   const { tenant_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
 
@@ -362,7 +376,7 @@ router.get('/dashboard/appointments', async (req, res) => {
 });
 
 // PATCH /dashboard/appointments/:id — update status
-router.patch('/dashboard/appointments/:id', async (req, res) => {
+router.patch('/dashboard/appointments/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { status, calendar_event_id } = req.body;
 
@@ -373,14 +387,14 @@ router.patch('/dashboard/appointments/:id', async (req, res) => {
 });
 
 // PATCH /dashboard/leads/:id/assign-human
-router.patch('/dashboard/leads/:id/assign-human', async (req, res) => {
+router.patch('/dashboard/leads/:id/assign-human', requireAuth, async (req, res) => {
   const { id } = req.params;
   const updated = await assignToHuman(id);
   return res.json({ lead: updated });
 });
 
 // GET /dashboard/conversations?tenant_id=xxx&lead_id=xxx
-router.get('/dashboard/conversations', async (req, res) => {
+router.get('/dashboard/conversations', requireAuth, async (req, res) => {
   const { tenant_id, lead_id } = req.query;
   if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
 
@@ -399,20 +413,55 @@ router.get('/dashboard/conversations', async (req, res) => {
   return res.json({ conversations: data });
 });
 
+// GET /dashboard/calls?tenant_id=xxx
+// Returns calls grouped by lead: [{ lead: {...}, calls: [...] }]
+// The Calls page opens a lead and shows all calls for that lead.
+router.get('/dashboard/calls', requireAuth, async (req, res) => {
+  const { tenant_id } = req.query;
+  if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
+
+  const { data: calls, error } = await supabase
+    .from('calls')
+    .select('*, leads(*)')
+    .eq('tenant_id', tenant_id)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) throw error;
+
+  // Group calls by lead so the dashboard can show per-lead call history
+  const leadsMap = new Map();
+  for (const call of calls) {
+    const leadId = call.lead_id;
+    if (!leadsMap.has(leadId)) {
+      leadsMap.set(leadId, { lead: call.leads, calls: [] });
+    }
+    const { leads: _leads, ...callRow } = call;
+    leadsMap.get(leadId).calls.push(callRow);
+  }
+
+  return res.json({ calls: Array.from(leadsMap.values()) });
+});
+
 // ─────────────────────────────────────────────
 // SETTINGS API
 // ─────────────────────────────────────────────
 
 // GET /settings/:tenant_id
+// Intentionally NOT auth-protected — also consumed by n8n workflows.
+// UUID guard prevents Next.js prefetch files (e.g. "index.txt") from
+// reaching Supabase and causing a type error.
 router.get('/settings/:tenant_id', async (req, res) => {
   const { tenant_id } = req.params;
+  if (!isUUID(tenant_id)) return res.status(400).json({ error: 'Invalid tenant_id' });
   const settings = await getSettings(tenant_id);
   return res.json(settings);
 });
 
-// PUT /settings/:tenant_id
-router.put('/settings/:tenant_id', async (req, res) => {
+// PUT /settings/:tenant_id — dashboard only, requires auth
+router.put('/settings/:tenant_id', requireAuth, async (req, res) => {
   const { tenant_id } = req.params;
+  if (!isUUID(tenant_id)) return res.status(400).json({ error: 'Invalid tenant_id' });
   const updated = await updateSettings(tenant_id, req.body);
   return res.json({ settings: updated });
 });

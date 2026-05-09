@@ -23,10 +23,9 @@ app.get('/health', (req, res) => {
 // Auth routes (no middleware needed — these are public)
 app.use('/auth', authRoutes);
 
-// API routes
-app.use('/', routes);
-
-// Dashboard static files — Next.js static export
+// Dashboard static files — served BEFORE API routes so Next.js prefetch
+// files (e.g. /settings/index.txt) are resolved here and never reach
+// the router where they would be misread as UUID params.
 const dashOut = path.join(__dirname, 'dashboard', 'out');
 app.use(express.static(dashOut));
 
@@ -38,6 +37,9 @@ app.get('/calls',        (req, res) => res.sendFile(path.join(dashOut, 'calls', 
 app.get('/appointments', (req, res) => res.sendFile(path.join(dashOut, 'appointments', 'index.html')));
 app.get('/settings',     (req, res) => res.sendFile(path.join(dashOut, 'settings',     'index.html')));
 app.get('/',             (req, res) => res.redirect('/overview'));
+
+// API routes — after static so file requests never bleed into route handlers
+app.use('/', routes);
 
 app.use(errorHandler);
 

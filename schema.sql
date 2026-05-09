@@ -38,6 +38,7 @@ CREATE TABLE settings (
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
 
   business_name TEXT DEFAULT 'My Business',
+  agent_name TEXT DEFAULT 'Sarah',
   business_email TEXT,
   business_phone TEXT,
   timezone TEXT DEFAULT 'America/New_York',

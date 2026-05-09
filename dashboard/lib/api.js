@@ -1,13 +1,21 @@
-// Tenant ID - in production this comes from login/session
-// For now it's set here — when you add multi-tenant login,
-// store tenant_id in sessionStorage after login and read it here
+// Tenant ID — comes from the session after login
 const TENANT_ID = process.env.NEXT_PUBLIC_TENANT_ID || '61bb686c-5381-43f6-b65b-07bbd2a1448f'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
+// Key must stay in sync with context/auth.js
+const AUTH_KEY = 'vlos_auth_token'
+
 async function apiFetch(path, options = {}) {
+  // Read token from sessionStorage (browser-only; safe because all pages
+  // are 'use client' in the static export — never runs on a server)
+  const token = typeof window !== 'undefined' ? sessionStorage.getItem(AUTH_KEY) : null
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
     ...options,
   })
   if (!res.ok) throw new Error(`API ${res.status}`)
