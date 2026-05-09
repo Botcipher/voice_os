@@ -8,7 +8,6 @@ CREATE TABLE settings (
 
   -- Business Info
   business_name TEXT DEFAULT 'Cool Air HVAC',
-  agent_name TEXT DEFAULT 'Sarah',
   business_email TEXT,
   business_phone TEXT,
   timezone TEXT DEFAULT 'America/New_York',
@@ -36,7 +35,6 @@ CREATE TABLE settings (
 INSERT INTO settings (
   tenant_id,
   business_name,
-  agent_name,
   business_email,
   business_phone,
   timezone,
@@ -52,7 +50,6 @@ INSERT INTO settings (
 ) VALUES (
   '61bb686c-5381-43f6-b65b-07bbd2a1448f',
   'Cool Air HVAC',
-  'Sarah',
   'info@coolair.com',
   '+15550000000',
   'America/New_York',

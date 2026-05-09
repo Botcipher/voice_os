@@ -3,48 +3,51 @@ require('express-async-errors');
 
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const routes = require('./routes');
 const authRoutes = require('./authRoutes');
 const { errorHandler, requestLogger } = require('./middleware');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+const NEXT_PORT = process.env.NEXT_PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
 app.use(requestLogger);
 
-// Health check
+// ── Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'Voice Lead OS', version: '1.0.0', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', service: 'Voice Lead OS', timestamp: new Date().toISOString() });
 });
 
-// Auth routes (no middleware needed — these are public)
+// ── Auth API routes
 app.use('/auth', authRoutes);
 
-// Dashboard static files — served BEFORE API routes so Next.js prefetch
-// files (e.g. /settings/index.txt) are resolved here and never reach
-// the router where they would be misread as UUID params.
-const dashOut = path.join(__dirname, 'dashboard', 'out');
-app.use(express.static(dashOut));
-
-// Dashboard page routes
-app.get('/login',        (req, res) => res.sendFile(path.join(dashOut, 'login',        'index.html')));
-app.get('/overview',     (req, res) => res.sendFile(path.join(dashOut, 'overview',     'index.html')));
-app.get('/leads',        (req, res) => res.sendFile(path.join(dashOut, 'leads',        'index.html')));
-app.get('/calls',        (req, res) => res.sendFile(path.join(dashOut, 'calls',        'index.html')));
-app.get('/appointments', (req, res) => res.sendFile(path.join(dashOut, 'appointments', 'index.html')));
-app.get('/settings',     (req, res) => res.sendFile(path.join(dashOut, 'settings',     'index.html')));
-app.get('/',             (req, res) => res.redirect('/overview'));
-
-// API routes — after static so file requests never bleed into route handlers
+// ── API routes (webhooks, dashboard data, settings)
 app.use('/', routes);
+
+// ── Everything else → proxy to Next.js
+// Next.js handles all dashboard pages (/, /overview, /leads, /calls etc)
+app.use('/', createProxyMiddleware({
+  target: `http://localhost:${NEXT_PORT}`,
+  changeOrigin: true,
+  ws: true,
+  on: {
+    error: (err, req, res) => {
+      console.error('[Proxy Error]', err.message);
+      if (res.writeHead) {
+        res.writeHead(502);
+        res.end('Dashboard starting up — please refresh in a moment.');
+      }
+    }
+  }
+}));
 
 app.use(errorHandler);
 
 app.listen(PORT, () => {
-  console.log(`✅ Voice Lead OS running on port ${PORT}`);
+  console.log(`✅ Voice Lead OS API running on port ${PORT}`);
+  console.log(`   Proxying dashboard from Next.js on port ${NEXT_PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   Dashboard: http://localhost:${PORT}/overview`);
 });

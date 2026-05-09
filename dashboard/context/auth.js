@@ -3,18 +3,16 @@ import { createContext, useContext, useState, useEffect } from 'react'
 
 const AuthContext = createContext(null)
 const AUTH_KEY = 'vlos_auth_token'
-const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 export function AuthProvider({ children }) {
   const [authed, setAuthed] = useState(false)
   const [checked, setChecked] = useState(false)
 
   useEffect(() => {
-    // Verify stored token with backend on every load
     const token = sessionStorage.getItem(AUTH_KEY)
     if (!token) { setChecked(true); return }
 
-    fetch(`${API_URL}/auth/verify`, {
+    fetch('/auth/verify', {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(r => { setAuthed(r.ok); setChecked(true) })
@@ -23,7 +21,7 @@ export function AuthProvider({ children }) {
 
   const login = async (password) => {
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
+      const res = await fetch('/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -35,9 +33,7 @@ export function AuthProvider({ children }) {
         return true
       }
       return false
-    } catch {
-      return false
-    }
+    } catch { return false }
   }
 
   const logout = () => {
