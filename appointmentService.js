@@ -52,14 +52,16 @@ async function updateAppointmentStatus(appointmentId, status, calendarEventId = 
   return data;
 }
 
-// Get upcoming appointments for a tenant
+// Get upcoming appointments for a tenant — shows from 24 hrs ago so recently booked ones always appear
 async function getUpcomingAppointments(tenantId) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
   const { data, error } = await supabase
     .from('appointments')
     .select(`*, leads(name, phone, email, job_type)`)
     .eq('tenant_id', tenantId)
     .in('status', ['booked', 'rescheduled'])
-    .gte('scheduled_at', new Date().toISOString())
+    .gte('scheduled_at', since)
     .order('scheduled_at', { ascending: true });
 
   if (error) throw error;
