@@ -62,23 +62,13 @@ router.post('/webhooks/retell', async (req, res) => {
     const isWebCall = call.call_type === 'web_call' || !toNumber;
 
     if (!isWebCall) {
-      // Real phone call — try phone number first, then agent_id as fallback
       result = await getTenantByPhone(toNumber);
-      if (!result) {
-        result = await getTenantByAgentId(call.agent_id);
-      }
+      if (!result) result = await getTenantByAgentId(call.agent_id);
     } else {
-      // Web call (test or embedded widget) — try metadata tenant_id, then agent_id
       const metaTenantId = call.metadata?.tenant_id;
-      if (metaTenantId) {
-        result = await getTenantById(metaTenantId);
-      }
-      if (!result) {
-        result = await getTenantByAgentId(call.agent_id);
-      }
-      if (!result) {
-        result = await getTenantById(WEB_CALL_TEST_TENANT_ID);
-      }
+      if (metaTenantId) result = await getTenantById(metaTenantId);
+      if (!result) result = await getTenantByAgentId(call.agent_id);
+      if (!result) result = await getTenantById(WEB_CALL_TEST_TENANT_ID);
     }
 
     if (!result) {
@@ -95,26 +85,21 @@ router.post('/webhooks/retell', async (req, res) => {
       emergency_callback_minutes: s.emergency_callback_minutes || 30,
     };
 
-    console.log('[call_started] Injecting variables:', dynamicVariables);
+    console.log('[call_started] Returning variables:', dynamicVariables);
 
-    try {
-      const patchRes = await fetch(`https://api.retellai.com/v2/call/${call.call_id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${process.env.RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ retell_llm_dynamic_variables: dynamicVariables }),
-      });
-      if (!patchRes.ok) console.error('[call_started] PATCH failed:', await patchRes.text());
-      else console.log('[call_started] Variables injected for:', dynamicVariables.business_name);
-    } catch (err) {
-      console.error('[call_started] Network error:', err.message);
-    }
-
-    return res.status(204).send();
+    // Return variables in the response body — this is the correct way for
+    // Conversation Flow agents. The old PATCH approach only works for LLM agents.
+    return res.status(200).json({ call_inbound_dynamic_variables: dynamicVariables });
   }
 
   if (event === 'call_ended' || event === 'call_analyzed') {
-    const tenantId = call.retell_llm_dynamic_variables?.tenant_id || call.metadata?.tenant_id || null;
-    if (!tenantId || tenantId === 'unknown') return res.status(204).send();
+    const tenantId = call.retell_llm_dynamic_variables?.tenant_id
+      || call.metadata?.tenant_id
+      || null;
+    if (!tenantId || tenantId === 'unknown' || tenantId === 'default') {
+      console.warn(`[${event}] No valid tenant_id — skipping`);
+      return res.status(204).send();
+    }
 
     const phone = call.from_number || '+10000000000';
 
@@ -124,30 +109,40 @@ router.post('/webhooks/retell', async (req, res) => {
       if (existing) return res.status(204).send();
     }
 
+    // Extract caller data from tool call arguments in the transcript.
+    // Conversation Flow agents don't populate call_analysis.custom_analysis_data —
+    // the data lives in transcript_with_tool_calls as tool invocation arguments.
+    const toolData = extractToolCallData(call.transcript_with_tool_calls);
+    console.log('[toolData] Extracted:', toolData);
+
     const { lead } = await upsertLead(tenantId, {
-      phone,
-      name: call.retell_llm_dynamic_variables?.caller_name || null,
-      email: call.metadata?.caller_email || null,
-      jobType: call.call_analysis?.custom_analysis_data?.job_type || null,
-      urgency: call.call_analysis?.custom_analysis_data?.urgency || 'normal',
-      address: call.call_analysis?.custom_analysis_data?.address || null,
-      notes: call.call_analysis?.custom_analysis_data?.notes || null,
+      phone:   toolData.caller_phone || phone,
+      name:    toolData.caller_name  || call.retell_llm_dynamic_variables?.caller_name || null,
+      email:   call.metadata?.caller_email || null,
+      jobType: toolData.job_type     || call.call_analysis?.custom_analysis_data?.job_type  || null,
+      urgency: toolData.urgency      || call.call_analysis?.custom_analysis_data?.urgency   || 'normal',
+      address: toolData.service_address || call.call_analysis?.custom_analysis_data?.address || null,
+      notes:   toolData.notes        || call.call_analysis?.custom_analysis_data?.notes     || null,
       source: 'call',
     });
 
     await saveCall(tenantId, lead.id, {
-      retell_call_id: retellCallId,
-      call_status: call.call_status || 'answered',
+      retell_call_id:   retellCallId,
+      call_status:      call.call_status || 'answered',
       duration_seconds: call.duration_ms ? Math.round(call.duration_ms / 1000) : 0,
-      transcript: call.transcript || null,
-      summary: call.call_analysis?.call_summary || null,
-      recording_url: call.recording_url || null,
+      transcript:       call.transcript  || null,
+      summary:          call.call_analysis?.call_summary || buildSummary(toolData) || null,
+      recording_url:    call.recording_url || null,
       started_at: call.start_timestamp ? new Date(call.start_timestamp).toISOString() : new Date().toISOString(),
-      ended_at: call.end_timestamp ? new Date(call.end_timestamp).toISOString() : new Date().toISOString(),
+      ended_at:   call.end_timestamp   ? new Date(call.end_timestamp).toISOString()   : new Date().toISOString(),
     });
 
-    const bookingMade = call.call_analysis?.custom_analysis_data?.booking_made || false;
-    const scheduledAt = call.call_analysis?.custom_analysis_data?.scheduled_at || null;
+    const bookingMade = toolData.intent === 'book service appointment'
+      || call.call_analysis?.custom_analysis_data?.booking_made
+      || false;
+    const scheduledAt = toolData.preferred_date || toolData.preferred_time
+      ? buildScheduledAt(toolData)
+      : call.call_analysis?.custom_analysis_data?.scheduled_at || null;
 
     if (call.call_status === 'failed' || call.call_status === 'missed') {
       await createEvent(tenantId, lead.id, 'call_failed', { call_status: call.call_status });
@@ -163,6 +158,50 @@ router.post('/webhooks/retell', async (req, res) => {
 
   return res.status(204).send();
 });
+
+// ── HELPERS for Conversation Flow tool call data extraction
+
+// Find the last booking or availability tool call and return its parsed arguments.
+function extractToolCallData(transcriptWithToolCalls) {
+  if (!Array.isArray(transcriptWithToolCalls)) return {};
+
+  // Prefer the booking call; fall back to any tool call invocation
+  const invocations = transcriptWithToolCalls.filter(e => e.role === 'tool_call_invocation');
+  if (invocations.length === 0) return {};
+
+  const booking = [...invocations].reverse().find(e => e.name === 'book_service_appointment');
+  const target = booking || invocations[invocations.length - 1];
+
+  try {
+    return JSON.parse(target.arguments || '{}');
+  } catch {
+    return {};
+  }
+}
+
+// Build a plain-English summary from tool data when Retell doesn't provide one.
+function buildSummary(toolData) {
+  if (!toolData.caller_name) return null;
+  const parts = [`Caller: ${toolData.caller_name}`];
+  if (toolData.job_type)        parts.push(`Job: ${toolData.job_type}`);
+  if (toolData.urgency)         parts.push(`Urgency: ${toolData.urgency}`);
+  if (toolData.service_address) parts.push(`Address: ${toolData.service_address}`);
+  if (toolData.preferred_date)  parts.push(`Date: ${toolData.preferred_date}`);
+  if (toolData.preferred_time)  parts.push(`Time: ${toolData.preferred_time}`);
+  if (toolData.notes)           parts.push(`Notes: ${toolData.notes}`);
+  return parts.join(' | ');
+}
+
+// Best-effort ISO timestamp from preferred_date + preferred_time strings.
+function buildScheduledAt(toolData) {
+  try {
+    const datePart = toolData.preferred_date || new Date().toISOString().split('T')[0];
+    const timePart = toolData.preferred_time || '09:00';
+    return new Date(`${datePart}T${timePart}`).toISOString();
+  } catch {
+    return null;
+  }
+}
 
 // ── DASHBOARD API
 
