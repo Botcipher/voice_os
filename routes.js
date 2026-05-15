@@ -18,6 +18,18 @@ async function getTenantByPhone(phoneNumber) {
   return { tenant, settings: settings || {} };
 }
 
+// Look up tenant by the Retell agent_id stored in their settings row
+async function getTenantByAgentId(agentId) {
+  if (!agentId) return null;
+  const { data: settings, error } = await supabase
+    .from('settings').select('*').eq('retell_agent_id', agentId).single();
+  if (error || !settings) return null;
+  const { data: tenant } = await supabase
+    .from('tenants').select('*').eq('id', settings.tenant_id).single();
+  if (!tenant) return null;
+  return { tenant, settings };
+}
+
 async function getTenantById(tenantId) {
   const { data: tenant, error } = await supabase
     .from('tenants').select('*').eq('id', tenantId).single();
@@ -49,10 +61,23 @@ router.post('/webhooks/retell', async (req, res) => {
     const isWebCall = call.call_type === 'web_call' || !toNumber;
 
     if (!isWebCall) {
+      // Real phone call — try phone number first, then agent_id as fallback
       result = await getTenantByPhone(toNumber);
+      if (!result) {
+        result = await getTenantByAgentId(call.agent_id);
+      }
     } else {
+      // Web call (test or embedded widget) — try metadata tenant_id, then agent_id
       const metaTenantId = call.metadata?.tenant_id;
-      result = await getTenantById(metaTenantId || WEB_CALL_TEST_TENANT_ID);
+      if (metaTenantId) {
+        result = await getTenantById(metaTenantId);
+      }
+      if (!result) {
+        result = await getTenantByAgentId(call.agent_id);
+      }
+      if (!result) {
+        result = await getTenantById(WEB_CALL_TEST_TENANT_ID);
+      }
     }
 
     if (!result) {
@@ -90,8 +115,7 @@ router.post('/webhooks/retell', async (req, res) => {
     const tenantId = call.retell_llm_dynamic_variables?.tenant_id || call.metadata?.tenant_id || null;
     if (!tenantId || tenantId === 'unknown') return res.status(204).send();
 
-    const phone = call.from_number || null;
-    if (!phone) return res.status(204).send();
+    const phone = call.from_number || '+10000000000';
 
     const retellCallId = call.call_id || null;
     if (retellCallId) {
@@ -231,6 +255,55 @@ router.put('/settings/:tenant_id', async (req, res) => {
   }
   const updated = await updateSettings(tenant_id, req.body);
   return res.json({ settings: updated });
+});
+
+// ── OUTBOUND CALL (initiate a real Retell phone call from the dashboard)
+
+router.post('/retell/call', async (req, res) => {
+  const { tenant_id, to_number } = req.body;
+  if (!tenant_id || !to_number) {
+    return res.status(400).json({ error: 'Missing tenant_id or to_number' });
+  }
+
+  const settings = await getSettings(tenant_id);
+  if (!settings.retell_agent_id || !settings.retell_phone_number) {
+    return res.status(400).json({
+      error: 'Retell agent ID and phone number must be set in Settings → Retell Integration before you can initiate calls.',
+    });
+  }
+
+  try {
+    const retellRes = await fetch('https://api.retellai.com/v2/create-phone-call', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RETELL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from_number: settings.retell_phone_number,
+        to_number,
+        override_agent_id: settings.retell_agent_id,
+        metadata: { tenant_id },
+        retell_llm_dynamic_variables: {
+          tenant_id,
+          business_name: settings.business_name || 'our company',
+          agent_name: settings.agent_name || 'Sarah',
+        },
+      }),
+    });
+
+    const retellData = await retellRes.json();
+    if (!retellRes.ok) {
+      console.error('[retell/call] Retell API error:', retellData);
+      return res.status(retellRes.status).json({ error: retellData.message || 'Retell API error' });
+    }
+
+    console.log(`[retell/call] Outbound call initiated to ${to_number} — call_id: ${retellData.call_id}`);
+    return res.json({ call_id: retellData.call_id, status: retellData.status });
+  } catch (err) {
+    console.error('[retell/call] Network error:', err.message);
+    return res.status(500).json({ error: 'Failed to reach Retell API' });
+  }
 });
 
 module.exports = router;
