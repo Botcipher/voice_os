@@ -195,8 +195,24 @@ function buildSummary(toolData) {
 // Best-effort ISO timestamp from preferred_date + preferred_time strings.
 function buildScheduledAt(toolData) {
   try {
-    const datePart = toolData.preferred_date || new Date().toISOString().split('T')[0];
     const timePart = toolData.preferred_time || '09:00';
+    let datePart = toolData.preferred_date || '';
+
+    if (!datePart) {
+      // No date given — use today, but push to tomorrow if time has already passed
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      const candidate = new Date(`${todayStr}T${timePart}`);
+      if (candidate <= now) {
+        // Push to tomorrow
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        datePart = tomorrow.toISOString().split('T')[0];
+      } else {
+        datePart = todayStr;
+      }
+    }
+
     return new Date(`${datePart}T${timePart}`).toISOString();
   } catch {
     return null;
