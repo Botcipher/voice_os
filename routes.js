@@ -54,6 +54,7 @@ router.post('/webhooks/retell', async (req, res) => {
   const call = body.call || {};
 
   console.log(`[Webhook] Event: ${event} | Call ID: ${call.call_id} | Type: ${call.call_type}`);
+  console.log('[Webhook] Full payload:', JSON.stringify(body, null, 2));
 
   if (event === 'call_started') {
     let result = null;
