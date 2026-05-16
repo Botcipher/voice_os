@@ -77,12 +77,22 @@ router.post('/webhooks/retell', async (req, res) => {
     }
 
     const { tenant, settings: s } = result;
+    // Get current date in the business timezone
+    const tz = s.timezone || 'UTC';
+    const now = new Date();
+    const currentDateSpoken = now.toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz,
+    });
+    const currentDateISO = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+
     const dynamicVariables = {
       tenant_id: tenant.id,
       business_name: s.business_name || tenant.business_name || 'our company',
       agent_name: s.agent_name || 'Sarah',
       working_hours: formatWorkingHours(s),
       emergency_callback_minutes: s.emergency_callback_minutes || 30,
+      current_date: currentDateSpoken,
+      current_date_iso: currentDateISO,
     };
 
     console.log('[call_started] Returning variables:', dynamicVariables);
