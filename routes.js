@@ -729,18 +729,15 @@ router.get('/test-call', (req, res) => {
   </div>
 </div>
 
-<script type="module">
-import { RetellWebClient } from 'https://esm.sh/retell-client-js-sdk';
-
+<script>
 const PASSWORD = '${password}';
 let retellClient = null;
 let timerInterval = null;
 let seconds = 0;
 let muted = false;
-let logCount = 0;
 
 // ── Password
-window.unlock = function() {
+function unlock() {
   if (document.getElementById('pw-input').value.trim() === PASSWORD.trim()) {
     document.getElementById('pw-screen').classList.add('hidden');
     document.getElementById('call-screen').classList.remove('hidden');
@@ -749,109 +746,97 @@ window.unlock = function() {
   } else {
     document.getElementById('pw-err').classList.remove('hidden');
   }
-};
-window.togglePwVis = function() {
+}
+function togglePwVis() {
   const input = document.getElementById('pw-input');
   const btn   = document.getElementById('pw-vis-btn');
   if (input.type === 'password') { input.type = 'text';     btn.textContent = 'Hide'; }
   else                           { input.type = 'password'; btn.textContent = 'Show'; }
-};
-document.getElementById('pw-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') window.unlock();
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var pi = document.getElementById('pw-input');
+  if (pi) pi.addEventListener('keydown', function(e){ if(e.key==='Enter') unlock(); });
 });
 
 // ── Tabs
-window.switchTab = function(name) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['transcript','log'][i] === name));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  if (name === 'log') document.getElementById('log-badge').textContent = '';
-};
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t,i){ t.classList.toggle('active', ['transcript','log'][i]===name); });
+  document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name==='log') document.getElementById('log-badge').textContent='';
+}
 
 // ── Tenants
-async function loadTenants() {
-  try {
-    const d = await fetch('/internal/tenants').then(r => r.json());
-    const sel = document.getElementById('tenant-sel');
-    sel.innerHTML = '<option value="">— Pick a tenant —</option>';
-    (d.tenants || []).forEach(t => {
-      const o = document.createElement('option');
+function loadTenants() {
+  fetch('/internal/tenants').then(function(r){ return r.json(); }).then(function(d) {
+    var sel = document.getElementById('tenant-sel');
+    sel.innerHTML = '<option value="">\u2014 Pick a tenant \u2014</option>';
+    (d.tenants||[]).forEach(function(t) {
+      var o = document.createElement('option');
       o.value = t.id;
-      o.textContent = t.business_name + (t.industry ? ' · ' + t.industry : '');
+      o.textContent = t.business_name + (t.industry ? ' \u00b7 '+t.industry : '');
       sel.appendChild(o);
     });
-  } catch(e) { showCallErr('Could not load tenants: ' + e.message); }
+  }).catch(function(e){ showCallErr('Could not load tenants: '+e.message); });
 }
 
 // ── SSE
 function connectSSE() {
-  const es = new EventSource('/debug/stream');
-  const dot = document.getElementById('sse-dot');
-  const lbl = document.getElementById('sse-label');
-
-  es.onopen = () => { dot.classList.add('live'); lbl.textContent = 'Live'; };
-  es.onerror = () => { dot.classList.remove('live'); lbl.textContent = 'Reconnecting…'; };
-
-  es.onmessage = e => {
-    try { addLogEntry(JSON.parse(e.data)); } catch(_) {}
-  };
+  var es = new EventSource('/debug/stream');
+  var dot = document.getElementById('sse-dot');
+  var lbl = document.getElementById('sse-label');
+  es.onopen = function(){ dot.classList.add('live'); lbl.textContent='Live'; };
+  es.onerror = function(){ dot.classList.remove('live'); lbl.textContent='Reconnecting\u2026'; };
+  es.onmessage = function(e) { try { addLogEntry(JSON.parse(e.data)); } catch(_){} };
 }
 
 // ── Log entries
 function addLogEntry(event) {
-  logCount++;
-  const isEmpty = document.getElementById('log-empty');
+  var isEmpty = document.getElementById('log-empty');
   if (isEmpty) isEmpty.remove();
-
-  const isLogTab = document.getElementById('tab-log').classList.contains('active');
-  if (!isLogTab) document.getElementById('log-badge').textContent = ' ·';
-
-  const container = document.getElementById('log-entries');
-  const entry = document.createElement('div');
+  var isLogTab = document.getElementById('tab-log').classList.contains('active');
+  if (!isLogTab) document.getElementById('log-badge').textContent=' \u00b7';
+  var container = document.getElementById('log-entries');
+  var entry = document.createElement('div');
   entry.className = 'log-entry';
-
-  const time = new Date(event.ts).toLocaleTimeString();
-  const typeClass = event.type.replace(/_/g,'-') + ' ' + event.type;
-
+  var time = new Date(event.ts).toLocaleTimeString();
   entry.innerHTML =
     '<div class="log-header" onclick="this.nextElementSibling.classList.toggle('open')">' +
-      '<span class="log-type ' + event.type + '">' + event.type.replace(/_/g,' ') + '</span>' +
-      '<span class="log-ts">' + time + '</span>' +
+      '<span class="log-type '+event.type+'">'+event.type.replace(/_/g,' ')+'</span>' +
+      '<span class="log-ts">'+time+'</span>' +
     '</div>' +
     '<div class="log-body">' +
-      '<pre>' + JSON.stringify(event.data, null, 2) + '</pre>' +
+      '<pre>'+JSON.stringify(event.data,null,2)+'</pre>' +
     '</div>';
-
-  // Auto-expand important events
-  if (event.type === 'call_started' || event.type === 'error') {
+  if (event.type==='call_started'||event.type==='error') {
     entry.querySelector('.log-body').classList.add('open');
-    // Switch to log tab automatically on first real event
-    if (event.type === 'call_started') switchTab('log');
+    if (event.type==='call_started') switchTab('log');
   }
-
   container.prepend(entry);
 }
 
-// ── Call
-window.startCall = async function() {
-  const tenantId = document.getElementById('tenant-sel').value;
+// ── Start call — dynamically imports SDK only when needed
+async function startCall() {
+  var tenantId = document.getElementById('tenant-sel').value;
   if (!tenantId) return showCallErr('Pick a tenant first.');
   hideCallErr();
-  setStatus('connecting', 'Registering…');
+  setStatus('connecting','Registering\u2026');
   document.getElementById('btn-start').disabled = true;
-
   try {
-    const d = await fetch('/retell/register-web-call', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_id: tenantId }),
-    }).then(r => r.json());
+    var d = await fetch('/retell/register-web-call',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tenant_id:tenantId})
+    }).then(function(r){return r.json();});
     if (d.error) throw new Error(d.error);
 
-    retellClient = new RetellWebClient();
+    // Import SDK only now — errors here won't block UI
+    var mod = await import('https://esm.sh/retell-client-js-sdk');
+    var RetellWebClient = mod.RetellWebClient;
 
-    retellClient.on('call-started', () => {
-      setStatus('live', 'Live');
+    retellClient = new RetellWebClient();
+    retellClient.on('call-started', function() {
+      setStatus('live','Live');
       startTimer();
       document.getElementById('btn-start').classList.add('hidden');
       document.getElementById('btn-end').classList.remove('hidden');
@@ -859,81 +844,74 @@ window.startCall = async function() {
       clearTranscript();
       switchTab('transcript');
     });
-
-    retellClient.on('update', update => {
-      if (update.transcript) renderTranscript(update.transcript);
-    });
-
-    retellClient.on('call-ended', () => resetCall());
-    retellClient.on('error', err => { showCallErr(err?.message || 'Call error'); resetCall(); });
-
+    retellClient.on('update', function(u){ if(u.transcript) renderTranscript(u.transcript); });
+    retellClient.on('call-ended', function(){ resetCall(); });
+    retellClient.on('error', function(err){ showCallErr((err&&err.message)||'Call error'); resetCall(); });
     await retellClient.startCall({ accessToken: d.access_token });
   } catch(e) {
     showCallErr(e.message);
     resetCall();
   }
-};
+}
 
-window.endCall = () => retellClient?.stopCall();
+function endCall() { if(retellClient) retellClient.stopCall(); }
 
-window.toggleMute = function() {
+function toggleMute() {
+  if (!retellClient) return;
   muted = !muted;
-  retellClient?.mute(muted);
-  const btn = document.getElementById('btn-mute');
-  btn.textContent = muted ? '🔇  Unmute' : '🎤  Mute';
+  retellClient.mute(muted);
+  var btn = document.getElementById('btn-mute');
+  btn.textContent = muted ? '\ud83d\udd07\u00a0 Unmute' : '\ud83c\udfa4\u00a0 Mute';
   btn.classList.toggle('muted-on', muted);
-};
+}
 
 // ── Transcript
 function clearTranscript() {
-  document.getElementById('tx-messages').innerHTML = '';
+  document.getElementById('tx-messages').innerHTML='';
   document.getElementById('tx-empty').classList.add('hidden');
 }
 function renderTranscript(transcript) {
-  const container = document.getElementById('tx-messages');
-  container.innerHTML = '';
-  transcript.forEach(msg => {
-    const div = document.createElement('div');
-    div.className = 'msg ' + (msg.role === 'agent' ? 'agent' : 'user');
-    div.innerHTML =
-      '<div class="msg-role">' + (msg.role === 'agent' ? 'Sarah' : 'Caller') + '</div>' +
-      '<div class="msg-bubble">' + msg.content + '</div>';
+  var container = document.getElementById('tx-messages');
+  container.innerHTML='';
+  transcript.forEach(function(msg){
+    var div = document.createElement('div');
+    div.className='msg '+(msg.role==='agent'?'agent':'user');
+    div.innerHTML='<div class="msg-role">'+(msg.role==='agent'?'Sarah':'Caller')+'</div>'+
+      '<div class="msg-bubble">'+msg.content+'</div>';
     container.appendChild(div);
   });
-  container.scrollTop = container.scrollHeight;
+  container.scrollTop=container.scrollHeight;
 }
 
 // ── Helpers
-function setStatus(state, text) {
+function setStatus(state,text){
   document.getElementById('status-pill').classList.remove('hidden');
-  document.getElementById('pill-dot').className = 'pill-dot ' + state;
-  document.getElementById('pill-text').textContent = text;
+  document.getElementById('pill-dot').className='pill-dot '+state;
+  document.getElementById('pill-text').textContent=text;
 }
-function startTimer() {
-  seconds = 0;
-  clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
+function startTimer(){
+  seconds=0; clearInterval(timerInterval);
+  timerInterval=setInterval(function(){
     seconds++;
-    const m = Math.floor(seconds/60), s = String(seconds%60).padStart(2,'0');
-    document.getElementById('pill-timer').textContent = m+':'+s;
-  }, 1000);
+    var m=Math.floor(seconds/60),s=String(seconds%60).padStart(2,'0');
+    document.getElementById('pill-timer').textContent=m+':'+s;
+  },1000);
 }
-function resetCall() {
-  clearInterval(timerInterval);
-  retellClient = null; muted = false;
+function resetCall(){
+  clearInterval(timerInterval); retellClient=null; muted=false;
   document.getElementById('status-pill').classList.add('hidden');
   document.getElementById('btn-start').classList.remove('hidden');
-  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-start').disabled=false;
   document.getElementById('btn-end').classList.add('hidden');
   document.getElementById('btn-mute').classList.add('hidden');
-  document.getElementById('btn-mute').textContent = '🎤  Mute';
-  document.getElementById('pill-timer').textContent = '0:00';
+  document.getElementById('btn-mute').textContent='\ud83c\udfa4\u00a0 Mute';
+  document.getElementById('pill-timer').textContent='0:00';
 }
-function showCallErr(msg) {
-  const e = document.getElementById('call-err');
-  e.textContent = msg; e.classList.remove('hidden');
+function showCallErr(msg){
+  var e=document.getElementById('call-err');
+  e.textContent=msg; e.classList.remove('hidden');
 }
-function hideCallErr() { document.getElementById('call-err').classList.add('hidden'); }
+function hideCallErr(){ document.getElementById('call-err').classList.add('hidden'); }
 </script>
 </body>
 </html>`;
