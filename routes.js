@@ -849,6 +849,14 @@ async function startCall() {
     retellClient.on('call-ended', function(){ showCallEndedState(); });
     retellClient.on('error', function(err){ showCallErr((err&&err.message)||'Call error'); resetCall(); });
     await retellClient.startCall({ accessToken: d.access_token });
+    // Show End Call immediately — don't wait for call-started event which may be unreliable
+    setStatus('connecting', 'Connecting…');
+    startTimer();
+    document.getElementById('btn-start').classList.add('hidden');
+    document.getElementById('btn-end').classList.remove('hidden');
+    document.getElementById('btn-mute').classList.remove('hidden');
+    clearTranscript();
+    switchTab('transcript');
   } catch(e) {
     showCallErr(e.message);
     resetCall();
