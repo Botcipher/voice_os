@@ -113,23 +113,47 @@ router.post('/webhooks/retell', async (req, res) => {
     }
 
     const dynamicVariables = {
-      tenant_id: tenant.id,
-      business_name: s.business_name || tenant.business_name || 'our company',
-      agent_name: s.agent_name || 'Sarah',
-      working_hours: formatWorkingHours(s),
+      // ── Tenant identity
+      tenant_id:                tenant.id,
+      business_name:            s.business_name || tenant.business_name || 'our company',
+      industry:                 tenant.industry  || 'home services',
+      agent_name:               s.agent_name     || 'Sarah',
+
+      // ── Contact info
+      business_email:           s.business_email  || tenant.email || '',
+      business_phone:           s.business_phone  || tenant.phone_number || '',
+      notify_email:             s.notify_email    || '',
+
+      // ── Schedule config
+      working_hours:            formatWorkingHours(s),
+      working_hours_start:      s.working_hours_start || '08:00',
+      working_hours_end:        s.working_hours_end   || '18:00',
+      working_days:             Array.isArray(s.working_days)
+                                  ? s.working_days.join(', ')
+                                  : 'Monday to Friday',
+      slot_duration_minutes:    s.slot_duration_minutes || 60,
+
+      // ── Emergency config
       emergency_callback_minutes: s.emergency_callback_minutes || 30,
-      // Date context — pre-computed so the LLM never needs to calculate
-      current_date:     currentDateSpoken,
-      current_date_iso: currentDateISO,
-      day_of_week:      DOW_NAMES[todayDow],
-      tomorrow_iso:     isoOf(addDays(todayLocal, 1)),
-      next_monday:      nextWeekdays['Monday'],
-      next_tuesday:     nextWeekdays['Tuesday'],
-      next_wednesday:   nextWeekdays['Wednesday'],
-      next_thursday:    nextWeekdays['Thursday'],
-      next_friday:      nextWeekdays['Friday'],
-      next_saturday:    nextWeekdays['Saturday'],
-      next_sunday:      nextWeekdays['Sunday'],
+      emergency_keywords:         Array.isArray(s.emergency_keywords)
+                                    ? s.emergency_keywords.join(', ')
+                                    : 'no heat, no ac, gas leak',
+
+      // ── Calendar
+      calendar_id:              s.calendar_id || '',
+
+      // ── Date context — pre-computed so the LLM never needs to calculate
+      current_date:             currentDateSpoken,
+      current_date_iso:         currentDateISO,
+      day_of_week:              DOW_NAMES[todayDow],
+      tomorrow_iso:             isoOf(addDays(todayLocal, 1)),
+      next_monday:              nextWeekdays['Monday'],
+      next_tuesday:             nextWeekdays['Tuesday'],
+      next_wednesday:           nextWeekdays['Wednesday'],
+      next_thursday:            nextWeekdays['Thursday'],
+      next_friday:              nextWeekdays['Friday'],
+      next_saturday:            nextWeekdays['Saturday'],
+      next_sunday:              nextWeekdays['Sunday'],
     };
 
     console.log('[call_started] Returning variables:', dynamicVariables);
