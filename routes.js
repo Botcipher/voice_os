@@ -210,7 +210,7 @@ router.post('/webhooks/retell', async (req, res) => {
     });
 
     if (!tenantId || tenantId === 'unknown' || tenantId === 'default') {
-      console.warn(\`[\${event}] No valid tenant_id — skipping\`);
+      console.warn('[' + event + '] No valid tenant_id \u2014 skipping');
       return res.status(204).send();
     }
 
