@@ -682,7 +682,10 @@ router.get('/test-call', (req, res) => {
       <div class="section-title">Access</div>
       <div id="pw-err" class="err-box hidden">Wrong password</div>
       <label>Password</label>
-      <input id="pw-input" type="password" placeholder="••••••••"/>
+      <div style="position:relative;margin-bottom:16px">
+        <input id="pw-input" type="password" placeholder="••••••••" style="margin-bottom:0;padding-right:56px"/>
+        <button onclick="togglePwVis()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;font-weight:600" id="pw-vis-btn">Show</button>
+      </div>
       <button class="btn btn-black" onclick="unlock()">Continue</button>
     </div>
 
@@ -738,7 +741,7 @@ let logCount = 0;
 
 // ── Password
 window.unlock = function() {
-  if (document.getElementById('pw-input').value === PASSWORD) {
+  if (document.getElementById('pw-input').value.trim() === PASSWORD.trim()) {
     document.getElementById('pw-screen').classList.add('hidden');
     document.getElementById('call-screen').classList.remove('hidden');
     loadTenants();
@@ -746,6 +749,12 @@ window.unlock = function() {
   } else {
     document.getElementById('pw-err').classList.remove('hidden');
   }
+};
+window.togglePwVis = function() {
+  const input = document.getElementById('pw-input');
+  const btn   = document.getElementById('pw-vis-btn');
+  if (input.type === 'password') { input.type = 'text';     btn.textContent = 'Hide'; }
+  else                           { input.type = 'password'; btn.textContent = 'Show'; }
 };
 document.getElementById('pw-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') window.unlock();
