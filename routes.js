@@ -3,7 +3,7 @@ const router = express.Router();
 const supabase = require('./supabase');
 const { upsertLead, assignToHuman } = require('./leadService');
 const { saveCall, getCallByRetellId } = require('./callService');
-const { getUpcomingAppointments, updateAppointmentStatus, getAppointmentByLead } = require('./appointmentService');
+const { createAppointment, getUpcomingAppointments, updateAppointmentStatus, getAppointmentByLead } = require('./appointmentService');
 const { createEvent } = require('./eventEngine');
 const { getSettings, updateSettings } = require('./settingsService');
 
@@ -450,7 +450,114 @@ router.post('/retell/call', async (req, res) => {
   }
 });
 
-// ── REGISTER WEB CALL
+// ── RETELL AGENT FUNCTIONS
+
+// check_availability — called by the agent to see if a slot is open
+router.post('/functions/check-availability', async (req, res) => {
+  const { preferred_date, time_preference, tenant_id } = req.body.args || req.body;
+  if (!tenant_id || !preferred_date) {
+    return res.status(400).json({ error: 'Missing tenant_id or preferred_date' });
+  }
+
+  const result = await getTenantById(tenant_id);
+  if (!result) return res.status(404).json({ error: 'Tenant not found' });
+
+  const { settings: s } = result;
+
+  // Get all appointments for this tenant on this date
+  const dayStart = new Date(`${preferred_date}T00:00:00.000Z`).toISOString();
+  const dayEnd   = new Date(`${preferred_date}T23:59:59.999Z`).toISOString();
+
+  const { data: existing } = await supabase
+    .from('appointments')
+    .select('scheduled_at')
+    .eq('tenant_id', tenant_id)
+    .in('status', ['booked', 'rescheduled'])
+    .gte('scheduled_at', dayStart)
+    .lte('scheduled_at', dayEnd);
+
+  const bookedTimes = (existing || []).map(a => new Date(a.scheduled_at).getHours());
+
+  // Morning = 9AM, Afternoon = 2PM
+  const wantMorning = (time_preference || '').toLowerCase().includes('morning');
+  const preferredHour = wantMorning ? 9 : 14;
+  const preferredLabel = wantMorning ? '9:00 AM' : '2:00 PM';
+
+  if (!bookedTimes.includes(preferredHour)) {
+    return res.json({
+      available: true,
+      slot_date: preferred_date,
+      slot_time: preferredLabel,
+      message: `${preferred_date} at ${preferredLabel} is available.`,
+    });
+  }
+
+  // Try alternate slot on same day
+  const altHour = wantMorning ? 11 : 16;
+  const altLabel = wantMorning ? '11:00 AM' : '4:00 PM';
+  if (!bookedTimes.includes(altHour)) {
+    return res.json({
+      available: true,
+      slot_date: preferred_date,
+      slot_time: altLabel,
+      message: `${preferredLabel} is taken but ${altLabel} on ${preferred_date} is available.`,
+    });
+  }
+
+  // Suggest next day same time
+  const nextDay = new Date(`${preferred_date}T12:00:00`);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const nextDayISO = nextDay.toLocaleDateString('en-CA');
+  return res.json({
+    available: false,
+    slot_date: nextDayISO,
+    slot_time: preferredLabel,
+    message: `No slots available on ${preferred_date}. Next available is ${nextDayISO} at ${preferredLabel}.`,
+  });
+});
+
+// book_service_appointment — called by the agent to confirm a booking
+router.post('/functions/book-appointment', async (req, res) => {
+  const args = req.body.args || req.body;
+  const {
+    caller_name, caller_phone, service_address,
+    job_type, preferred_date, preferred_time,
+    urgency = 'normal', notes = '', tenant_id,
+  } = args;
+
+  if (!tenant_id || !caller_name || !caller_phone || !preferred_date) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // Upsert lead
+  const { lead } = await upsertLead(tenant_id, {
+    phone:   caller_phone,
+    name:    caller_name,
+    address: service_address || null,
+    jobType: job_type || null,
+    urgency,
+    notes:   notes || null,
+    source:  'call',
+  });
+
+  // Build scheduled_at
+  const timeHour = (preferred_time || '').toLowerCase().includes('afternoon') ? 14 : 9;
+  const scheduledAt = new Date(`${preferred_date}T${String(timeHour).padStart(2,'0')}:00:00`).toISOString();
+
+  // Create appointment
+  const { appointment } = await createAppointment(tenant_id, lead.id, scheduledAt);
+
+  // Fire event
+  await createEvent(tenant_id, lead.id, 'appointment_booked', { scheduled_at: scheduledAt, lead });
+
+  console.log(`[book-appointment] Booked for ${caller_name} on ${preferred_date} at ${preferred_time}`);
+
+  return res.json({
+    success: true,
+    appointment_id: appointment.id,
+    message: `Appointment confirmed for ${caller_name} on ${preferred_date} in the ${preferred_time}.`,
+  });
+});
 // Creates a Retell web call session from the backend so the call_started
 // webhook fires and all dynamic variables are injected properly —
 // even during testing from the dashboard or an embedded widget.
@@ -468,6 +575,13 @@ router.post('/retell/register-web-call', async (req, res) => {
     return res.status(400).json({ error: 'No Retell agent ID configured for this tenant. Set it in Settings.' });
   }
 
+  // Build variables and ensure all values are strings (Retell requirement)
+  const dynamicVariables = buildDynamicVariables(tenant, s);
+  const stringVars = {};
+  for (const [k, v] of Object.entries(dynamicVariables)) {
+    stringVars[k] = String(v);
+  }
+
   try {
     const retellRes = await fetch('https://api.retellai.com/v2/create-web-call', {
       method: 'POST',
@@ -478,6 +592,7 @@ router.post('/retell/register-web-call', async (req, res) => {
       body: JSON.stringify({
         agent_id: s.retell_agent_id,
         metadata: { tenant_id: resolvedTenantId },
+        retell_llm_dynamic_variables: stringVars,
       }),
     });
 
