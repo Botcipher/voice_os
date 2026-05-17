@@ -801,7 +801,7 @@ function addLogEntry(event) {
   entry.className = 'log-entry';
   var time = new Date(event.ts).toLocaleTimeString();
   entry.innerHTML =
-    '<div class="log-header" onclick="this.nextElementSibling.classList.toggle('open')">' +
+    '<div class="log-header" onclick="this.nextElementSibling.classList.toggle(\'open\')">' +
       '<span class="log-type '+event.type+'">'+event.type.replace(/_/g,' ')+'</span>' +
       '<span class="log-ts">'+time+'</span>' +
     '</div>' +
