@@ -683,8 +683,8 @@ router.get('/test-call', (req, res) => {
       <div id="pw-err" class="err-box hidden">Wrong password</div>
       <label>Password</label>
       <div style="position:relative;margin-bottom:16px">
-        <input id="pw-input" type="password" placeholder="••••••••" style="margin-bottom:0;padding-right:56px"/>
-        <button onclick="togglePwVis()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;font-weight:600" id="pw-vis-btn">Show</button>
+        <input id="pw-input" type="password" placeholder="Password" style="margin-bottom:0;padding:10px 40px 10px 12px"/>
+        <button type="button" onclick="togglePwVis()" id="pw-vis-btn" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:#8c8c8c;font-size:13px;font-family:inherit;user-select:none">Show</button>
       </div>
       <button class="btn btn-black" onclick="unlock()">Continue</button>
     </div>
