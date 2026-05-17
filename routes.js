@@ -80,10 +80,37 @@ router.post('/webhooks/retell', async (req, res) => {
     // Get current date in the business timezone
     const tz = s.timezone || 'UTC';
     const now = new Date();
+
     const currentDateSpoken = now.toLocaleDateString('en-US', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz,
     });
     const currentDateISO = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+
+    // Pre-compute all relative dates so the LLM never has to do date arithmetic.
+    // GPT-4 reliably fails at "next Monday from 2026-05-17" — we give it the answers.
+    const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+    // Build a local-noon Date for today in the correct timezone to avoid DST edge cases
+    const [yr, mo, dy] = currentDateISO.split('-').map(Number);
+    const todayLocal = new Date(yr, mo - 1, dy, 12, 0, 0);
+    const todayDow = todayLocal.getDay(); // 0=Sun … 6=Sat
+
+    function addDays(d, n) {
+      const r = new Date(d);
+      r.setDate(r.getDate() + n);
+      return r;
+    }
+    function isoOf(d) {
+      return d.toLocaleDateString('en-CA', { timeZone: tz });
+    }
+
+    // Next occurrence of each weekday, always ≥1 day in the future
+    // (if today IS that weekday, returns NEXT week's occurrence)
+    const nextWeekdays = {};
+    for (let i = 0; i < 7; i++) {
+      const daysUntil = ((i - todayDow + 7) % 7) || 7;
+      nextWeekdays[DOW_NAMES[i]] = isoOf(addDays(todayLocal, daysUntil));
+    }
 
     const dynamicVariables = {
       tenant_id: tenant.id,
@@ -91,8 +118,18 @@ router.post('/webhooks/retell', async (req, res) => {
       agent_name: s.agent_name || 'Sarah',
       working_hours: formatWorkingHours(s),
       emergency_callback_minutes: s.emergency_callback_minutes || 30,
-      current_date: currentDateSpoken,
+      // Date context — pre-computed so the LLM never needs to calculate
+      current_date:     currentDateSpoken,
       current_date_iso: currentDateISO,
+      day_of_week:      DOW_NAMES[todayDow],
+      tomorrow_iso:     isoOf(addDays(todayLocal, 1)),
+      next_monday:      nextWeekdays['Monday'],
+      next_tuesday:     nextWeekdays['Tuesday'],
+      next_wednesday:   nextWeekdays['Wednesday'],
+      next_thursday:    nextWeekdays['Thursday'],
+      next_friday:      nextWeekdays['Friday'],
+      next_saturday:    nextWeekdays['Saturday'],
+      next_sunday:      nextWeekdays['Sunday'],
     };
 
     console.log('[call_started] Returning variables:', dynamicVariables);
@@ -104,6 +141,7 @@ router.post('/webhooks/retell', async (req, res) => {
 
   if (event === 'call_ended' || event === 'call_analyzed') {
     const tenantId = call.retell_llm_dynamic_variables?.tenant_id
+      || call.call_inbound_dynamic_variables?.tenant_id
       || call.metadata?.tenant_id
       || null;
     if (!tenantId || tenantId === 'unknown' || tenantId === 'default') {
