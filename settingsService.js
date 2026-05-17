@@ -24,7 +24,8 @@ async function updateSettings(tenantId, updates) {
     'business_name', 'agent_name', 'business_email', 'business_phone', 'timezone',
     'sender_email', 'slot_duration_minutes', 'working_hours_start',
     'working_hours_end', 'working_days', 'emergency_keywords',
-    'emergency_callback_minutes', 'calendar_id', 'notify_email'
+    'emergency_callback_minutes', 'calendar_id', 'notify_email',
+    'retell_agent_id', 'retell_phone_number',
   ];
 
   // Strip any fields that aren't allowed
@@ -64,6 +65,8 @@ function getDefaults(tenantId) {
     emergency_callback_minutes: 30,
     calendar_id: '',
     notify_email: '',
+    retell_agent_id: '',
+    retell_phone_number: '',
   };
 }
 
