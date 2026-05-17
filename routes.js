@@ -485,7 +485,7 @@ router.post('/retell/register-web-call', async (req, res) => {
 
 
 // ── LIST TENANTS (for test-call page dropdown)
-router.get('/api/tenants', async (req, res) => {
+router.get('/internal/tenants', async (req, res) => {
   const { data, error } = await supabase
     .from('tenants')
     .select('id, business_name, industry')
@@ -508,16 +508,16 @@ router.get('/test-call', (req, res) => {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --border: #2a2d3e;
-      --accent: #6c63ff;
-      --accent-hover: #574fd6;
-      --danger: #e05252;
-      --danger-hover: #c03c3c;
-      --success: #3ecf8e;
-      --text: #e8e8f0;
-      --muted: #7b7f9e;
+      --bg: #ffffff;
+      --surface: #f9f9fb;
+      --border: #e4e4e7;
+      --accent: #18181b;
+      --accent-hover: #3f3f46;
+      --danger: #dc2626;
+      --danger-hover: #b91c1c;
+      --success: #16a34a;
+      --text: #18181b;
+      --muted: #71717a;
       --radius: 12px;
     }
     body {
@@ -531,103 +531,87 @@ router.get('/test-call', (req, res) => {
       padding: 24px;
     }
     .card {
-      background: var(--surface);
+      background: var(--bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 40px;
       width: 100%;
       max-width: 440px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
     }
     .logo {
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 11px;
+      font-weight: 700;
       letter-spacing: 2px;
       text-transform: uppercase;
-      color: var(--accent);
-      margin-bottom: 8px;
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-    .subtitle {
       color: var(--muted);
-      font-size: 14px;
-      margin-bottom: 32px;
+      margin-bottom: 10px;
     }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 32px; line-height: 1.5; }
     label {
       display: block;
       font-size: 12px;
       font-weight: 600;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.4px;
       color: var(--muted);
       text-transform: uppercase;
-      margin-bottom: 8px;
+      margin-bottom: 7px;
     }
     input, select {
       width: 100%;
-      background: var(--bg);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
       color: var(--text);
       font-size: 15px;
-      padding: 12px 16px;
+      padding: 11px 14px;
       outline: none;
-      transition: border-color 0.2s;
+      transition: border-color 0.15s;
       margin-bottom: 20px;
+      appearance: none;
     }
     input:focus, select:focus { border-color: var(--accent); }
-    select option { background: var(--bg); }
     .btn {
       width: 100%;
-      padding: 14px;
+      padding: 13px;
       border: none;
       border-radius: 8px;
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s, opacity 0.2s;
+      transition: background 0.15s, opacity 0.15s;
     }
-    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-primary { background: var(--accent); color: #fff; }
     .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
     .btn-danger  { background: var(--danger); color: #fff; }
-    .btn-danger:hover:not(:disabled)  { background: var(--danger-hover); }
+    .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
     .error-msg {
-      background: rgba(224,82,82,0.12);
-      border: 1px solid var(--danger);
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
       border-radius: 8px;
       color: var(--danger);
       font-size: 13px;
       padding: 10px 14px;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
     .status-bar {
       display: flex;
       align-items: center;
       gap: 10px;
-      background: var(--bg);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 12px 16px;
-      margin-bottom: 20px;
+      padding: 11px 14px;
+      margin-bottom: 16px;
       font-size: 14px;
     }
-    .dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: var(--muted);
-      flex-shrink: 0;
-    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
     .dot.live { background: var(--success); animation: pulse 1.5s infinite; }
-    .dot.connecting { background: #f5a623; animation: pulse 0.8s infinite; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-    .timer { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+    .dot.connecting { background: #d97706; animation: pulse 0.8s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+    .timer { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
     .mute-btn {
       width: 100%;
       padding: 11px;
@@ -638,12 +622,13 @@ router.get('/test-call', (req, res) => {
       font-size: 14px;
       font-weight: 500;
       cursor: pointer;
-      margin-bottom: 12px;
-      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 10px;
+      transition: border-color 0.15s, background 0.15s;
     }
-    .mute-btn:hover { border-color: var(--accent); background: rgba(108,99,255,0.08); }
+    .mute-btn:hover { border-color: var(--accent); background: var(--surface); }
     .mute-btn.muted { border-color: var(--danger); color: var(--danger); }
     .hidden { display: none !important; }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
   </style>
 </head>
 <body>
@@ -653,20 +638,21 @@ router.get('/test-call', (req, res) => {
   <!-- Password screen -->
   <div id="screen-password">
     <h1>Test Call</h1>
-    <p class="subtitle">Internal use only — enter the access password to continue.</p>
-    <div id="pw-error" class="error-msg hidden">Incorrect password. Try again.</div>
+    <p class="subtitle">Internal use only. Enter the access password to continue.</p>
+    <div id="pw-error" class="error-msg hidden">Incorrect password — try again.</div>
     <label for="pw-input">Password</label>
-    <input id="pw-input" type="password" placeholder="Enter password" autocomplete="off"/>
+    <input id="pw-input" type="password" placeholder="••••••••" autocomplete="off"/>
     <button class="btn btn-primary" onclick="checkPassword()">Continue</button>
   </div>
 
   <!-- Main screen -->
   <div id="screen-main" class="hidden">
     <h1>Test Call</h1>
-    <p class="subtitle">Select a tenant and start a live call through the backend.</p>
+    <p class="subtitle">Pick a tenant and start a live call through the backend. All dynamic variables will be injected automatically.</p>
+    <hr class="divider"/>
     <label for="tenant-select">Tenant</label>
     <select id="tenant-select">
-      <option value="">Loading tenants…</option>
+      <option value="">Loading…</option>
     </select>
     <div id="status-bar" class="status-bar hidden">
       <span class="dot" id="status-dot"></span>
@@ -674,9 +660,9 @@ router.get('/test-call', (req, res) => {
       <span class="timer" id="timer">0:00</span>
     </div>
     <div id="call-error" class="error-msg hidden"></div>
-    <button id="mute-btn" class="mute-btn hidden" onclick="toggleMute()">🎤 Mute</button>
+    <button id="mute-btn" class="mute-btn hidden" onclick="toggleMute()">🎤  Mute</button>
     <button id="start-btn" class="btn btn-primary" onclick="startCall()">Start Test Call</button>
-    <button id="end-btn"   class="btn btn-danger hidden" onclick="endCall()">End Call</button>
+    <button id="end-btn" class="btn btn-danger hidden" onclick="endCall()">End Call</button>
   </div>
 </div>
 
@@ -684,7 +670,6 @@ router.get('/test-call', (req, res) => {
   import { RetellWebClient } from 'https://esm.sh/retell-client-js-sdk';
 
   const CORRECT_PASSWORD = '${password}';
-  const API_BASE = '${apiBase}';
 
   let retellClient = null;
   let timerInterval = null;
@@ -706,17 +691,17 @@ router.get('/test-call', (req, res) => {
     if (e.key === 'Enter') window.checkPassword();
   });
 
-  // ── Load tenants
+  // ── Load tenants — use relative URL, same Express server
   async function loadTenants() {
     try {
-      const res  = await fetch(API_BASE + '/api/tenants');
+      const res  = await fetch('/internal/tenants');
       const data = await res.json();
       const sel  = document.getElementById('tenant-select');
       sel.innerHTML = '<option value="">— Pick a tenant —</option>';
       (data.tenants || []).forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
-        opt.textContent = t.business_name + (t.industry ? ' (' + t.industry + ')' : '');
+        opt.textContent = t.business_name + (t.industry ? ' · ' + t.industry : '');
         sel.appendChild(opt);
       });
     } catch (err) {
@@ -728,13 +713,12 @@ router.get('/test-call', (req, res) => {
   window.startCall = async function() {
     const tenantId = document.getElementById('tenant-select').value;
     if (!tenantId) return showError('Please select a tenant first.');
-
     hideError();
     setStatus('connecting', 'Registering call…');
     document.getElementById('start-btn').disabled = true;
 
     try {
-      const res  = await fetch(API_BASE + '/retell/register-web-call', {
+      const res  = await fetch('/retell/register-web-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenant_id: tenantId }),
@@ -744,18 +728,16 @@ router.get('/test-call', (req, res) => {
 
       retellClient = new RetellWebClient();
 
-      retellClient.on('call-started',  () => {
+      retellClient.on('call-started', () => {
         setStatus('live', 'Live');
         startTimer();
         document.getElementById('start-btn').classList.add('hidden');
         document.getElementById('end-btn').classList.remove('hidden');
         document.getElementById('mute-btn').classList.remove('hidden');
       });
-
       retellClient.on('call-ended', () => resetUI());
-
       retellClient.on('error', err => {
-        showError('Call error: ' + (err?.message || 'Unknown error'));
+        showError('Call error: ' + (err?.message || 'Unknown'));
         resetUI();
       });
 
@@ -767,29 +749,21 @@ router.get('/test-call', (req, res) => {
     }
   };
 
-  // ── End call
-  window.endCall = function() {
-    retellClient?.stopCall();
-  };
+  window.endCall   = () => retellClient?.stopCall();
 
-  // ── Mute
   window.toggleMute = function() {
     if (!retellClient) return;
     muted = !muted;
     retellClient.mute(muted);
     const btn = document.getElementById('mute-btn');
-    btn.textContent = muted ? '🔇 Unmute' : '🎤 Mute';
+    btn.textContent = muted ? '🔇  Unmute' : '🎤  Mute';
     btn.classList.toggle('muted', muted);
   };
 
-  // ── Helpers
   function setStatus(state, text) {
-    const bar  = document.getElementById('status-bar');
-    const dot  = document.getElementById('status-dot');
-    const label = document.getElementById('status-text');
-    bar.classList.remove('hidden');
-    dot.className = 'dot ' + state;
-    label.textContent = text;
+    document.getElementById('status-bar').classList.remove('hidden');
+    document.getElementById('status-dot').className = 'dot ' + state;
+    document.getElementById('status-text').textContent = text;
   }
 
   function startTimer() {
@@ -805,31 +779,27 @@ router.get('/test-call', (req, res) => {
 
   function resetUI() {
     clearInterval(timerInterval);
-    retellClient = null;
-    muted = false;
+    retellClient = null; muted = false;
     document.getElementById('status-bar').classList.add('hidden');
     document.getElementById('start-btn').classList.remove('hidden');
     document.getElementById('start-btn').disabled = false;
     document.getElementById('end-btn').classList.add('hidden');
     document.getElementById('mute-btn').classList.add('hidden');
-    document.getElementById('mute-btn').textContent = '🎤 Mute';
+    document.getElementById('mute-btn').textContent = '🎤  Mute';
     document.getElementById('timer').textContent = '0:00';
   }
 
   function showError(msg) {
     const el = document.getElementById('call-error');
-    el.textContent = msg;
-    el.classList.remove('hidden');
+    el.textContent = msg; el.classList.remove('hidden');
   }
-
-  function hideError() {
-    document.getElementById('call-error').classList.add('hidden');
-  }
+  function hideError() { document.getElementById('call-error').classList.add('hidden'); }
 </script>
 </body>
 </html>`;
 
-  res.setHeader('Content-Type', 'text/html');
+  
+    res.setHeader('Content-Type', 'text/html');
   return res.send(html);
 });
 
