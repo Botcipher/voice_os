@@ -62,6 +62,54 @@ function formatWorkingHours(s) {
     : 'Monday to Friday 8AM to 6PM';
 }
 
+function buildDynamicVariables(tenant, s) {
+  const tz = s.timezone || 'UTC';
+  const now = new Date();
+  const currentDateSpoken = now.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz,
+  });
+  const currentDateISO = now.toLocaleDateString('en-CA', { timeZone: tz });
+  const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const [yr, mo, dy] = currentDateISO.split('-').map(Number);
+  const todayLocal = new Date(yr, mo - 1, dy, 12, 0, 0);
+  const todayDow = todayLocal.getDay();
+  function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+  function isoOf(d) { return d.toLocaleDateString('en-CA', { timeZone: tz }); }
+  const nextWeekdays = {};
+  for (let i = 0; i < 7; i++) {
+    const daysUntil = ((i - todayDow + 7) % 7) || 7;
+    nextWeekdays[DOW_NAMES[i]] = isoOf(addDays(todayLocal, daysUntil));
+  }
+  return {
+    tenant_id:                  tenant.id,
+    business_name:              s.business_name || tenant.business_name || 'our company',
+    industry:                   tenant.industry  || 'home services',
+    agent_name:                 s.agent_name     || 'Sarah',
+    business_email:             s.business_email  || tenant.email || '',
+    business_phone:             s.business_phone  || tenant.phone_number || '',
+    notify_email:               s.notify_email    || '',
+    working_hours:              formatWorkingHours(s),
+    working_hours_start:        s.working_hours_start || '08:00',
+    working_hours_end:          s.working_hours_end   || '18:00',
+    working_days:               Array.isArray(s.working_days) ? s.working_days.join(', ') : 'Monday to Friday',
+    slot_duration_minutes:      s.slot_duration_minutes || 60,
+    emergency_callback_minutes: s.emergency_callback_minutes || 30,
+    emergency_keywords:         Array.isArray(s.emergency_keywords) ? s.emergency_keywords.join(', ') : 'no heat, no ac, gas leak',
+    calendar_id:                s.calendar_id || '',
+    current_date:               currentDateSpoken,
+    current_date_iso:           currentDateISO,
+    day_of_week:                DOW_NAMES[todayDow],
+    tomorrow_iso:               isoOf(addDays(todayLocal, 1)),
+    next_monday:                nextWeekdays['Monday'],
+    next_tuesday:               nextWeekdays['Tuesday'],
+    next_wednesday:             nextWeekdays['Wednesday'],
+    next_thursday:              nextWeekdays['Thursday'],
+    next_friday:                nextWeekdays['Friday'],
+    next_saturday:              nextWeekdays['Saturday'],
+    next_sunday:                nextWeekdays['Sunday'],
+  };
+}
+
 // ── RETELL WEBHOOK
 router.post('/webhooks/retell', async (req, res) => {
   const body = req.body;
@@ -99,84 +147,7 @@ router.post('/webhooks/retell', async (req, res) => {
     }
 
     const { tenant, settings: s } = result;
-    // Get current date in the business timezone
-    const tz = s.timezone || 'UTC';
-    const now = new Date();
-
-    const currentDateSpoken = now.toLocaleDateString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz,
-    });
-    const currentDateISO = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
-
-    // Pre-compute all relative dates so the LLM never has to do date arithmetic.
-    // GPT-4 reliably fails at "next Monday from 2026-05-17" — we give it the answers.
-    const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-
-    // Build a local-noon Date for today in the correct timezone to avoid DST edge cases
-    const [yr, mo, dy] = currentDateISO.split('-').map(Number);
-    const todayLocal = new Date(yr, mo - 1, dy, 12, 0, 0);
-    const todayDow = todayLocal.getDay(); // 0=Sun … 6=Sat
-
-    function addDays(d, n) {
-      const r = new Date(d);
-      r.setDate(r.getDate() + n);
-      return r;
-    }
-    function isoOf(d) {
-      return d.toLocaleDateString('en-CA', { timeZone: tz });
-    }
-
-    // Next occurrence of each weekday, always ≥1 day in the future
-    // (if today IS that weekday, returns NEXT week's occurrence)
-    const nextWeekdays = {};
-    for (let i = 0; i < 7; i++) {
-      const daysUntil = ((i - todayDow + 7) % 7) || 7;
-      nextWeekdays[DOW_NAMES[i]] = isoOf(addDays(todayLocal, daysUntil));
-    }
-
-    const dynamicVariables = {
-      // ── Tenant identity
-      tenant_id:                tenant.id,
-      business_name:            s.business_name || tenant.business_name || 'our company',
-      industry:                 tenant.industry  || 'home services',
-      agent_name:               s.agent_name     || 'Sarah',
-
-      // ── Contact info
-      business_email:           s.business_email  || tenant.email || '',
-      business_phone:           s.business_phone  || tenant.phone_number || '',
-      notify_email:             s.notify_email    || '',
-
-      // ── Schedule config
-      working_hours:            formatWorkingHours(s),
-      working_hours_start:      s.working_hours_start || '08:00',
-      working_hours_end:        s.working_hours_end   || '18:00',
-      working_days:             Array.isArray(s.working_days)
-                                  ? s.working_days.join(', ')
-                                  : 'Monday to Friday',
-      slot_duration_minutes:    s.slot_duration_minutes || 60,
-
-      // ── Emergency config
-      emergency_callback_minutes: s.emergency_callback_minutes || 30,
-      emergency_keywords:         Array.isArray(s.emergency_keywords)
-                                    ? s.emergency_keywords.join(', ')
-                                    : 'no heat, no ac, gas leak',
-
-      // ── Calendar
-      calendar_id:              s.calendar_id || '',
-
-      // ── Date context — pre-computed so the LLM never needs to calculate
-      current_date:             currentDateSpoken,
-      current_date_iso:         currentDateISO,
-      day_of_week:              DOW_NAMES[todayDow],
-      tomorrow_iso:             isoOf(addDays(todayLocal, 1)),
-      next_monday:              nextWeekdays['Monday'],
-      next_tuesday:             nextWeekdays['Tuesday'],
-      next_wednesday:           nextWeekdays['Wednesday'],
-      next_thursday:            nextWeekdays['Thursday'],
-      next_friday:              nextWeekdays['Friday'],
-      next_saturday:            nextWeekdays['Saturday'],
-      next_sunday:              nextWeekdays['Sunday'],
-    };
+    const dynamicVariables = buildDynamicVariables(tenant, s);
 
     console.log('[call_started] Returning variables:', dynamicVariables);
 
@@ -488,10 +459,14 @@ router.post('/retell/register-web-call', async (req, res) => {
     return res.status(404).json({ error: 'Tenant not found' });
   }
 
-  const { settings: s } = result;
+  const { tenant, settings: s } = result;
   if (!s.retell_agent_id) {
     return res.status(400).json({ error: 'No Retell agent ID configured for this tenant. Set it in Settings.' });
   }
+
+  // Build variables NOW so Retell has them before the agent speaks its first word
+  const dynamicVariables = buildDynamicVariables(tenant, s);
+  console.log('[register-web-call] Sending variables to Retell:', dynamicVariables);
 
   try {
     const retellRes = await fetch('https://api.retellai.com/v2/create-web-call', {
@@ -503,6 +478,7 @@ router.post('/retell/register-web-call', async (req, res) => {
       body: JSON.stringify({
         agent_id: s.retell_agent_id,
         metadata: { tenant_id: resolvedTenantId },
+        retell_llm_dynamic_variables: dynamicVariables,
       }),
     });
 
@@ -514,10 +490,11 @@ router.post('/retell/register-web-call', async (req, res) => {
 
     console.log(`[register-web-call] Created web call — call_id: ${data.call_id}`);
     emitDebugEvent('web_call_registered', {
-      call_id:     data.call_id,
-      tenant_id:   resolvedTenantId,
-      tenant_name: result.tenant?.business_name || result.settings?.business_name || 'unknown',
-      agent_id:    s.retell_agent_id,
+      call_id:        data.call_id,
+      tenant_id:      resolvedTenantId,
+      tenant_name:    result.tenant?.business_name || result.settings?.business_name || 'unknown',
+      agent_id:       s.retell_agent_id,
+      variables_sent: dynamicVariables,
     });
     // Return the access_token so the frontend/widget can connect
     return res.json({
