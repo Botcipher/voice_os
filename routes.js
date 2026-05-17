@@ -735,6 +735,8 @@ let retellClient = null;
 let timerInterval = null;
 let seconds = 0;
 let muted = false;
+let callState = 'idle'; // idle | registering | active | ended
+let agentDisplayName = 'Agent'; // updated when call starts from backend log data
 
 // ── Password
 function unlock() {
@@ -810,71 +812,110 @@ function addLogEntry(event) {
     '</div>';
   if (event.type==='call_started'||event.type==='error') {
     entry.querySelector('.log-body').classList.add('open');
-    if (event.type==='call_started') switchTab('log');
+    if (event.type==='call_started') {
+      switchTab('log');
+      // Capture agent name so transcript shows real name not "Sarah"
+      if (event.data && event.data.variables_sent && event.data.variables_sent.agent_name) {
+        agentDisplayName = event.data.variables_sent.agent_name;
+      }
+    }
   }
   container.prepend(entry);
 }
 
 // ── Start call — dynamically imports SDK only when needed
 async function startCall() {
+  // Prevent double-start
+  if (callState === 'registering' || callState === 'active') return;
   var tenantId = document.getElementById('tenant-sel').value;
   if (!tenantId) return showCallErr('Pick a tenant first.');
+
+  callState = 'registering';
   hideCallErr();
-  setStatus('connecting','Registering\u2026');
+  setStatus('connecting', 'Registering\u2026');
   document.getElementById('btn-start').disabled = true;
+
   try {
-    var d = await fetch('/retell/register-web-call',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tenant_id:tenantId})
-    }).then(function(r){return r.json();});
+    var d = await fetch('/retell/register-web-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId })
+    }).then(function(r) { return r.json(); });
+
     if (d.error) throw new Error(d.error);
 
-    // Import SDK only now — errors here won't block UI
+    // Destroy any leftover client before creating a new one
+    if (retellClient) {
+      try { retellClient.stopCall(); } catch(_) {}
+      retellClient = null;
+    }
+
     var mod = await import('https://esm.sh/retell-client-js-sdk');
     var RetellWebClient = mod.RetellWebClient;
-
     retellClient = new RetellWebClient();
+
     retellClient.on('call-started', function() {
-      setStatus('live','Live');
+      if (callState === 'ended') return; // already ended before this fired
+      callState = 'active';
+      setStatus('live', 'Live');
+      clearInterval(timerInterval);
       startTimer();
       document.getElementById('btn-start').classList.add('hidden');
       document.getElementById('btn-end').classList.remove('hidden');
       document.getElementById('btn-mute').classList.remove('hidden');
       clearTranscript();
       switchTab('transcript');
-      document.getElementById('btn-start').textContent = 'Start Test Call';
     });
-    retellClient.on('update', function(u){ if(u.transcript) renderTranscript(u.transcript); });
-    retellClient.on('call-ended', function(){ showCallEndedState(); });
-    retellClient.on('error', function(err){ showCallErr((err&&err.message)||'Call error'); resetCall(); });
+
+    retellClient.on('update', function(u) {
+      if (u.transcript) renderTranscript(u.transcript, agentDisplayName);
+    });
+
+    retellClient.on('call-ended', function() {
+      // Only handle once
+      if (callState === 'ended' || callState === 'idle') return;
+      showCallEndedState();
+    });
+
+    retellClient.on('error', function(err) {
+      showCallErr((err && err.message) || 'Call error');
+      showCallEndedState();
+    });
+
     await retellClient.startCall({ accessToken: d.access_token });
-    // Show End Call immediately — don't wait for call-started event which may be unreliable
-    setStatus('connecting', 'Connecting…');
-    startTimer();
-    document.getElementById('btn-start').classList.add('hidden');
-    document.getElementById('btn-end').classList.remove('hidden');
-    document.getElementById('btn-mute').classList.remove('hidden');
-    clearTranscript();
-    switchTab('transcript');
+
+    // Show End Call button right after startCall resolves
+    // (call-started may fire before or after this line — both are handled)
+    if (callState === 'registering') {
+      callState = 'active';
+      setStatus('connecting', 'Connecting\u2026');
+      startTimer();
+      document.getElementById('btn-start').classList.add('hidden');
+      document.getElementById('btn-end').classList.remove('hidden');
+      document.getElementById('btn-mute').classList.remove('hidden');
+      clearTranscript();
+      switchTab('transcript');
+    }
+
   } catch(e) {
     showCallErr(e.message);
-    resetCall();
-  }
-}
-
-function endCall() {
-  if(retellClient) {
-    try { retellClient.stopCall(); } catch(e) { console.warn('stopCall error:', e); }
-  } else {
     showCallEndedState();
   }
 }
 
+function endCall() {
+  if (callState === 'idle' || callState === 'ended') return;
+  if (retellClient) {
+    try { retellClient.stopCall(); } catch(_) {}
+  }
+  // Don't wait for call-ended event — force the UI reset now
+  showCallEndedState();
+}
+
 function toggleMute() {
-  if (!retellClient) return;
+  if (!retellClient || callState !== 'active') return;
   muted = !muted;
-  retellClient.mute(muted);
+  try { retellClient.mute(muted); } catch(_) {}
   var btn = document.getElementById('btn-mute');
   btn.textContent = muted ? '\ud83d\udd07\u00a0 Unmute' : '\ud83c\udfa4\u00a0 Mute';
   btn.classList.toggle('muted-on', muted);
@@ -882,72 +923,75 @@ function toggleMute() {
 
 // ── Transcript
 function clearTranscript() {
-  document.getElementById('tx-messages').innerHTML='';
+  document.getElementById('tx-messages').innerHTML = '';
   document.getElementById('tx-empty').classList.add('hidden');
 }
-function renderTranscript(transcript) {
+function renderTranscript(transcript, agentName) {
+  var name = agentName || agentDisplayName || 'Agent';
   var container = document.getElementById('tx-messages');
-  container.innerHTML='';
-  transcript.forEach(function(msg){
+  container.innerHTML = '';
+  transcript.forEach(function(msg) {
+    var isAgent = msg.role === 'agent';
     var div = document.createElement('div');
-    div.className='msg '+(msg.role==='agent'?'agent':'user');
-    div.innerHTML='<div class="msg-role">'+(msg.role==='agent'?'Sarah':'Caller')+'</div>'+
-      '<div class="msg-bubble">'+msg.content+'</div>';
+    div.className = 'msg ' + (isAgent ? 'agent' : 'user');
+    div.innerHTML = '<div class="msg-role">' + (isAgent ? name : 'Caller') + '</div>' +
+      '<div class="msg-bubble">' + msg.content + '</div>';
     container.appendChild(div);
   });
-  container.scrollTop=container.scrollHeight;
+  container.scrollTop = container.scrollHeight;
 }
 
 // ── Helpers
-function setStatus(state,text){
+function setStatus(state, text) {
   document.getElementById('status-pill').classList.remove('hidden');
-  document.getElementById('pill-dot').className='pill-dot '+state;
-  document.getElementById('pill-text').textContent=text;
+  document.getElementById('pill-dot').className = 'pill-dot ' + state;
+  document.getElementById('pill-dot').style.background = '';
+  document.getElementById('pill-text').textContent = text;
 }
-function startTimer(){
-  seconds=0; clearInterval(timerInterval);
-  timerInterval=setInterval(function(){
+function startTimer() {
+  seconds = 0; clearInterval(timerInterval);
+  timerInterval = setInterval(function() {
     seconds++;
-    var m=Math.floor(seconds/60),s=String(seconds%60).padStart(2,'0');
-    document.getElementById('pill-timer').textContent=m+':'+s;
-  },1000);
+    var m = Math.floor(seconds / 60), s = String(seconds % 60).padStart(2, '0');
+    document.getElementById('pill-timer').textContent = m + ':' + s;
+  }, 1000);
 }
 function showCallEndedState() {
+  // Guard: if already idle, do nothing
+  if (callState === 'idle') return;
+  callState = 'ended';
   clearInterval(timerInterval);
-  if (retellClient) { try { retellClient.stopCall(); } catch(_) {} retellClient = null; }
+  // Safely destroy client
+  if (retellClient) {
+    try { retellClient.stopCall(); } catch(_) {}
+    retellClient = null;
+  }
   muted = false;
-  // Show ended status so user knows call is done
+  // Update UI
   document.getElementById('status-pill').classList.remove('hidden');
   var dot = document.getElementById('pill-dot');
-  dot.className = 'pill-dot'; dot.style.background = '#71717a';
-  document.getElementById('pill-text').textContent = 'Call ended — ready for new call';
+  dot.className = 'pill-dot';
+  dot.style.background = '#71717a';
+  document.getElementById('pill-text').textContent = 'Call ended';
+  document.getElementById('pill-timer').textContent = '0:00';
   document.getElementById('btn-end').classList.add('hidden');
   document.getElementById('btn-mute').classList.add('hidden');
   document.getElementById('btn-mute').textContent = '\ud83c\udfa4\u00a0 Mute';
-  // Re-enable start button immediately — no refresh needed
   var startBtn = document.getElementById('btn-start');
-  startBtn.textContent = '\u260e\ufe0f Start New Call';
+  startBtn.textContent = 'Start New Call';
   startBtn.classList.remove('hidden');
   startBtn.disabled = false;
+  callState = 'idle';
 }
-function resetCall(){
-  clearInterval(timerInterval);
-  if (retellClient) { try { retellClient.stopCall(); } catch(_) {} retellClient = null; }
-  muted = false;
-  document.getElementById('status-pill').classList.add('hidden');
-  document.getElementById('btn-start').classList.remove('hidden');
-  document.getElementById('btn-start').disabled = false;
-  document.getElementById('btn-start').textContent = 'Start Test Call';
-  document.getElementById('btn-end').classList.add('hidden');
-  document.getElementById('btn-mute').classList.add('hidden');
-  document.getElementById('btn-mute').textContent = '\ud83c\udfa4\u00a0 Mute';
-  document.getElementById('pill-timer').textContent = '0:00';
+function resetCall() {
+  callState = 'ended'; // triggers showCallEndedState guard properly
+  showCallEndedState();
 }
-function showCallErr(msg){
-  var e=document.getElementById('call-err');
-  e.textContent=msg; e.classList.remove('hidden');
+function showCallErr(msg) {
+  var e = document.getElementById('call-err');
+  e.textContent = msg; e.classList.remove('hidden');
 }
-function hideCallErr(){ document.getElementById('call-err').classList.add('hidden'); }
+function hideCallErr() { document.getElementById('call-err').classList.add('hidden'); }
 </script>
 </body>
 </html>`;
