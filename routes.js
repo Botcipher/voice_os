@@ -434,4 +434,403 @@ router.post('/retell/call', async (req, res) => {
   }
 });
 
+// ── REGISTER WEB CALL
+// Creates a Retell web call session from the backend so the call_started
+// webhook fires and all dynamic variables are injected properly —
+// even during testing from the dashboard or an embedded widget.
+router.post('/retell/register-web-call', async (req, res) => {
+  const { tenant_id } = req.body;
+  const resolvedTenantId = tenant_id || WEB_CALL_TEST_TENANT_ID;
+
+  const result = await getTenantById(resolvedTenantId);
+  if (!result) {
+    return res.status(404).json({ error: 'Tenant not found' });
+  }
+
+  const { settings: s } = result;
+  if (!s.retell_agent_id) {
+    return res.status(400).json({ error: 'No Retell agent ID configured for this tenant. Set it in Settings.' });
+  }
+
+  try {
+    const retellRes = await fetch('https://api.retellai.com/v2/create-web-call', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RETELL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent_id: s.retell_agent_id,
+        metadata: { tenant_id: resolvedTenantId },
+      }),
+    });
+
+    const data = await retellRes.json();
+    if (!retellRes.ok) {
+      console.error('[register-web-call] Retell error:', data);
+      return res.status(retellRes.status).json({ error: data.message || 'Retell API error' });
+    }
+
+    console.log(`[register-web-call] Created web call — call_id: ${data.call_id}`);
+    // Return the access_token so the frontend/widget can connect
+    return res.json({
+      call_id:      data.call_id,
+      access_token: data.access_token,
+    });
+  } catch (err) {
+    console.error('[register-web-call] Network error:', err.message);
+    return res.status(500).json({ error: 'Failed to reach Retell API' });
+  }
+});
+
+
+// ── LIST TENANTS (for test-call page dropdown)
+router.get('/api/tenants', async (req, res) => {
+  const { data, error } = await supabase
+    .from('tenants')
+    .select('id, business_name, industry')
+    .order('business_name', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  return res.json({ tenants: data });
+});
+
+// ── TEST CALL PAGE
+router.get('/test-call', (req, res) => {
+  const password = process.env.TEST_CALL_PASSWORD || 'voiceos2025';
+  const apiBase  = process.env.NEXT_PUBLIC_API_URL || '';
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Voice OS — Test Call</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --accent: #6c63ff;
+      --accent-hover: #574fd6;
+      --danger: #e05252;
+      --danger-hover: #c03c3c;
+      --success: #3ecf8e;
+      --text: #e8e8f0;
+      --muted: #7b7f9e;
+      --radius: 12px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    }
+    .logo {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    input, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 15px;
+      padding: 12px 16px;
+      outline: none;
+      transition: border-color 0.2s;
+      margin-bottom: 20px;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    select option { background: var(--bg); }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled)  { background: var(--danger-hover); }
+    .error-msg {
+      background: rgba(224,82,82,0.12);
+      border: 1px solid var(--danger);
+      border-radius: 8px;
+      color: var(--danger);
+      font-size: 13px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .dot.live { background: var(--success); animation: pulse 1.5s infinite; }
+    .dot.connecting { background: #f5a623; animation: pulse 0.8s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .timer { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+    .mute-btn {
+      width: 100%;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .mute-btn:hover { border-color: var(--accent); background: rgba(108,99,255,0.08); }
+    .mute-btn.muted { border-color: var(--danger); color: var(--danger); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">Voice OS</div>
+
+  <!-- Password screen -->
+  <div id="screen-password">
+    <h1>Test Call</h1>
+    <p class="subtitle">Internal use only — enter the access password to continue.</p>
+    <div id="pw-error" class="error-msg hidden">Incorrect password. Try again.</div>
+    <label for="pw-input">Password</label>
+    <input id="pw-input" type="password" placeholder="Enter password" autocomplete="off"/>
+    <button class="btn btn-primary" onclick="checkPassword()">Continue</button>
+  </div>
+
+  <!-- Main screen -->
+  <div id="screen-main" class="hidden">
+    <h1>Test Call</h1>
+    <p class="subtitle">Select a tenant and start a live call through the backend.</p>
+    <label for="tenant-select">Tenant</label>
+    <select id="tenant-select">
+      <option value="">Loading tenants…</option>
+    </select>
+    <div id="status-bar" class="status-bar hidden">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Connecting…</span>
+      <span class="timer" id="timer">0:00</span>
+    </div>
+    <div id="call-error" class="error-msg hidden"></div>
+    <button id="mute-btn" class="mute-btn hidden" onclick="toggleMute()">🎤 Mute</button>
+    <button id="start-btn" class="btn btn-primary" onclick="startCall()">Start Test Call</button>
+    <button id="end-btn"   class="btn btn-danger hidden" onclick="endCall()">End Call</button>
+  </div>
+</div>
+
+<script type="module">
+  import { RetellWebClient } from 'https://esm.sh/retell-client-js-sdk';
+
+  const CORRECT_PASSWORD = '${password}';
+  const API_BASE = '${apiBase}';
+
+  let retellClient = null;
+  let timerInterval = null;
+  let seconds = 0;
+  let muted = false;
+
+  // ── Password
+  window.checkPassword = function() {
+    const val = document.getElementById('pw-input').value;
+    if (val === CORRECT_PASSWORD) {
+      document.getElementById('screen-password').classList.add('hidden');
+      document.getElementById('screen-main').classList.remove('hidden');
+      loadTenants();
+    } else {
+      document.getElementById('pw-error').classList.remove('hidden');
+    }
+  };
+  document.getElementById('pw-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') window.checkPassword();
+  });
+
+  // ── Load tenants
+  async function loadTenants() {
+    try {
+      const res  = await fetch(API_BASE + '/api/tenants');
+      const data = await res.json();
+      const sel  = document.getElementById('tenant-select');
+      sel.innerHTML = '<option value="">— Pick a tenant —</option>';
+      (data.tenants || []).forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.business_name + (t.industry ? ' (' + t.industry + ')' : '');
+        sel.appendChild(opt);
+      });
+    } catch (err) {
+      showError('Could not load tenants: ' + err.message);
+    }
+  }
+
+  // ── Start call
+  window.startCall = async function() {
+    const tenantId = document.getElementById('tenant-select').value;
+    if (!tenantId) return showError('Please select a tenant first.');
+
+    hideError();
+    setStatus('connecting', 'Registering call…');
+    document.getElementById('start-btn').disabled = true;
+
+    try {
+      const res  = await fetch(API_BASE + '/retell/register-web-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenantId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to register call');
+
+      retellClient = new RetellWebClient();
+
+      retellClient.on('call-started',  () => {
+        setStatus('live', 'Live');
+        startTimer();
+        document.getElementById('start-btn').classList.add('hidden');
+        document.getElementById('end-btn').classList.remove('hidden');
+        document.getElementById('mute-btn').classList.remove('hidden');
+      });
+
+      retellClient.on('call-ended', () => resetUI());
+
+      retellClient.on('error', err => {
+        showError('Call error: ' + (err?.message || 'Unknown error'));
+        resetUI();
+      });
+
+      await retellClient.startCall({ accessToken: data.access_token });
+
+    } catch (err) {
+      showError(err.message);
+      resetUI();
+    }
+  };
+
+  // ── End call
+  window.endCall = function() {
+    retellClient?.stopCall();
+  };
+
+  // ── Mute
+  window.toggleMute = function() {
+    if (!retellClient) return;
+    muted = !muted;
+    retellClient.mute(muted);
+    const btn = document.getElementById('mute-btn');
+    btn.textContent = muted ? '🔇 Unmute' : '🎤 Mute';
+    btn.classList.toggle('muted', muted);
+  };
+
+  // ── Helpers
+  function setStatus(state, text) {
+    const bar  = document.getElementById('status-bar');
+    const dot  = document.getElementById('status-dot');
+    const label = document.getElementById('status-text');
+    bar.classList.remove('hidden');
+    dot.className = 'dot ' + state;
+    label.textContent = text;
+  }
+
+  function startTimer() {
+    seconds = 0;
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      seconds++;
+      const m = Math.floor(seconds / 60);
+      const s = String(seconds % 60).padStart(2, '0');
+      document.getElementById('timer').textContent = m + ':' + s;
+    }, 1000);
+  }
+
+  function resetUI() {
+    clearInterval(timerInterval);
+    retellClient = null;
+    muted = false;
+    document.getElementById('status-bar').classList.add('hidden');
+    document.getElementById('start-btn').classList.remove('hidden');
+    document.getElementById('start-btn').disabled = false;
+    document.getElementById('end-btn').classList.add('hidden');
+    document.getElementById('mute-btn').classList.add('hidden');
+    document.getElementById('mute-btn').textContent = '🎤 Mute';
+    document.getElementById('timer').textContent = '0:00';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('call-error');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function hideError() {
+    document.getElementById('call-error').classList.add('hidden');
+  }
+</script>
+</body>
+</html>`;
+
+  res.setHeader('Content-Type', 'text/html');
+  return res.send(html);
+});
+
 module.exports = router;
