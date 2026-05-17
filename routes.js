@@ -843,9 +843,10 @@ async function startCall() {
       document.getElementById('btn-mute').classList.remove('hidden');
       clearTranscript();
       switchTab('transcript');
+      document.getElementById('btn-start').textContent = 'Start Test Call';
     });
     retellClient.on('update', function(u){ if(u.transcript) renderTranscript(u.transcript); });
-    retellClient.on('call-ended', function(){ resetCall(); });
+    retellClient.on('call-ended', function(){ showCallEndedState(); });
     retellClient.on('error', function(err){ showCallErr((err&&err.message)||'Call error'); resetCall(); });
     await retellClient.startCall({ accessToken: d.access_token });
   } catch(e) {
@@ -854,7 +855,13 @@ async function startCall() {
   }
 }
 
-function endCall() { if(retellClient) retellClient.stopCall(); }
+function endCall() {
+  if(retellClient) {
+    try { retellClient.stopCall(); } catch(e) { console.warn('stopCall error:', e); }
+  } else {
+    showCallEndedState();
+  }
+}
 
 function toggleMute() {
   if (!retellClient) return;
@@ -897,15 +904,36 @@ function startTimer(){
     document.getElementById('pill-timer').textContent=m+':'+s;
   },1000);
 }
-function resetCall(){
-  clearInterval(timerInterval); retellClient=null; muted=false;
-  document.getElementById('status-pill').classList.add('hidden');
-  document.getElementById('btn-start').classList.remove('hidden');
-  document.getElementById('btn-start').disabled=false;
+function showCallEndedState() {
+  clearInterval(timerInterval);
+  if (retellClient) { try { retellClient.stopCall(); } catch(_) {} retellClient = null; }
+  muted = false;
+  // Show ended status so user knows call is done
+  document.getElementById('status-pill').classList.remove('hidden');
+  var dot = document.getElementById('pill-dot');
+  dot.className = 'pill-dot'; dot.style.background = '#71717a';
+  document.getElementById('pill-text').textContent = 'Call ended — ready for new call';
   document.getElementById('btn-end').classList.add('hidden');
   document.getElementById('btn-mute').classList.add('hidden');
-  document.getElementById('btn-mute').textContent='\ud83c\udfa4\u00a0 Mute';
-  document.getElementById('pill-timer').textContent='0:00';
+  document.getElementById('btn-mute').textContent = '\ud83c\udfa4\u00a0 Mute';
+  // Re-enable start button immediately — no refresh needed
+  var startBtn = document.getElementById('btn-start');
+  startBtn.textContent = '\u260e\ufe0f Start New Call';
+  startBtn.classList.remove('hidden');
+  startBtn.disabled = false;
+}
+function resetCall(){
+  clearInterval(timerInterval);
+  if (retellClient) { try { retellClient.stopCall(); } catch(_) {} retellClient = null; }
+  muted = false;
+  document.getElementById('status-pill').classList.add('hidden');
+  document.getElementById('btn-start').classList.remove('hidden');
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-start').textContent = 'Start Test Call';
+  document.getElementById('btn-end').classList.add('hidden');
+  document.getElementById('btn-mute').classList.add('hidden');
+  document.getElementById('btn-mute').textContent = '\ud83c\udfa4\u00a0 Mute';
+  document.getElementById('pill-timer').textContent = '0:00';
 }
 function showCallErr(msg){
   var e=document.getElementById('call-err');
