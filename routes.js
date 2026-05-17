@@ -464,10 +464,6 @@ router.post('/retell/register-web-call', async (req, res) => {
     return res.status(400).json({ error: 'No Retell agent ID configured for this tenant. Set it in Settings.' });
   }
 
-  // Build variables NOW so Retell has them before the agent speaks its first word
-  const dynamicVariables = buildDynamicVariables(tenant, s);
-  console.log('[register-web-call] Sending variables to Retell:', dynamicVariables);
-
   try {
     const retellRes = await fetch('https://api.retellai.com/v2/create-web-call', {
       method: 'POST',
@@ -478,7 +474,6 @@ router.post('/retell/register-web-call', async (req, res) => {
       body: JSON.stringify({
         agent_id: s.retell_agent_id,
         metadata: { tenant_id: resolvedTenantId },
-        retell_llm_dynamic_variables: dynamicVariables,
       }),
     });
 
@@ -490,11 +485,10 @@ router.post('/retell/register-web-call', async (req, res) => {
 
     console.log(`[register-web-call] Created web call — call_id: ${data.call_id}`);
     emitDebugEvent('web_call_registered', {
-      call_id:        data.call_id,
-      tenant_id:      resolvedTenantId,
-      tenant_name:    result.tenant?.business_name || result.settings?.business_name || 'unknown',
-      agent_id:       s.retell_agent_id,
-      variables_sent: dynamicVariables,
+      call_id:     data.call_id,
+      tenant_id:   resolvedTenantId,
+      tenant_name: result.tenant?.business_name || result.settings?.business_name || 'unknown',
+      agent_id:    s.retell_agent_id,
     });
     // Return the access_token so the frontend/widget can connect
     return res.json({
