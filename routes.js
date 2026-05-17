@@ -162,9 +162,13 @@ router.post('/webhooks/retell', async (req, res) => {
       variables_sent: dynamicVariables,
     });
 
-    // Return variables in the response body — this is the correct way for
-    // Conversation Flow agents. The old PATCH approach only works for LLM agents.
-    return res.status(200).json({ call_inbound_dynamic_variables: dynamicVariables });
+    // Single Prompt agents use retell_llm_dynamic_variables
+    // Conversation Flow agents use call_inbound_dynamic_variables
+    // Returning both keys ensures compatibility with either agent type
+    return res.status(200).json({
+      retell_llm_dynamic_variables: dynamicVariables,
+      call_inbound_dynamic_variables: dynamicVariables,
+    });
   }
 
   if (event === 'call_ended' || event === 'call_analyzed') {
