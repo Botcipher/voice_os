@@ -38,9 +38,9 @@ function CallDrawer({ lead, onClose }) {
             {call.transcript && (
               <details>
                 <summary style={{ padding: '9px 14px', fontSize: 11.5, color: 'var(--text-3)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', background: 'var(--bg-subtle)', borderTop: '1px solid var(--border)', userSelect: 'none' }}>
-                  View transcript
+                  View full transcript
                 </summary>
-                <div style={{ padding: '12px 14px', fontSize: 11.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-2)' }}>
+                <div style={{ padding: '12px 14px', fontSize: 11.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 600, overflow: 'auto', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-2)', borderTop: '1px solid var(--border)' }}>
                   {call.transcript}
                 </div>
               </details>
