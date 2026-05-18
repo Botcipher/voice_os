@@ -540,9 +540,21 @@ router.post('/functions/book-appointment', async (req, res) => {
     source:  'call',
   });
 
-  // Build scheduled_at
-  const timeHour = (preferred_time || '').toLowerCase().includes('afternoon') ? 14 : 9;
-  const scheduledAt = new Date(`${preferred_date}T${String(timeHour).padStart(2,'0')}:00:00`).toISOString();
+  // Build scheduled_at from exactly what the agent sent
+  // preferred_time can be "morning", "afternoon", or "HH:MM"
+  let hour = 9; // default morning
+  if (preferred_time) {
+    const t = preferred_time.toLowerCase();
+    if (t.includes('afternoon')) {
+      hour = 14;
+    } else if (t.match(/^\d{1,2}:\d{2}/)) {
+      // HH:MM format — use directly
+      hour = parseInt(t.split(':')[0], 10);
+    }
+  }
+  const pad = n => String(n).padStart(2, '0');
+  // Build as UTC noon on the correct date to avoid any day shifting
+  const scheduledAt = `${preferred_date}T${pad(hour)}:00:00.000Z`;
 
   // Create appointment
   const { appointment } = await createAppointment(tenant_id, lead.id, scheduledAt);
@@ -558,6 +570,107 @@ router.post('/functions/book-appointment', async (req, res) => {
     message: `Appointment confirmed for ${caller_name} on ${preferred_date} in the ${preferred_time}.`,
   });
 });
+
+// reschedule_appointment — find existing booking by phone and move it to a new slot
+router.post('/functions/reschedule-appointment', async (req, res) => {
+  const args = req.body.args || req.body;
+  const { caller_phone, new_date, new_time, tenant_id } = args;
+
+  if (!tenant_id || !caller_phone || !new_date) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // Find the lead by phone
+  const { data: lead, error: leadErr } = await supabase
+    .from('leads')
+    .select('id, name')
+    .eq('tenant_id', tenant_id)
+    .eq('phone', caller_phone)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (leadErr || !lead) {
+    return res.json({ success: false, message: 'No existing booking found for that number.' });
+  }
+
+  // Find their active appointment
+  const { data: appointment, error: apptErr } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('lead_id', lead.id)
+    .in('status', ['booked', 'rescheduled'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (apptErr || !appointment) {
+    return res.json({ success: false, message: 'No active appointment found to reschedule.' });
+  }
+
+  // Build new scheduled_at
+  const timeHour = (new_time || '').toLowerCase().includes('afternoon') ? 14 : 9;
+  const scheduledAt = new Date(`${new_date}T${String(timeHour).padStart(2,'0')}:00:00`).toISOString();
+
+  // Update appointment
+  await updateAppointmentStatus(appointment.id, 'rescheduled');
+  await supabase.from('appointments').update({ scheduled_at: scheduledAt, status: 'rescheduled', updated_at: new Date().toISOString() }).eq('id', appointment.id);
+  await createEvent(tenant_id, lead.id, 'call_completed', { note: `Rescheduled to ${new_date} ${new_time}` });
+
+  console.log(`[reschedule] ${lead.name} rescheduled to ${new_date} ${new_time}`);
+  return res.json({
+    success: true,
+    message: `Appointment rescheduled to ${new_date} in the ${new_time || 'morning'}.`,
+  });
+});
+
+// cancel_appointment — find existing booking by phone and cancel it
+router.post('/functions/cancel-appointment', async (req, res) => {
+  const args = req.body.args || req.body;
+  const { caller_phone, tenant_id } = args;
+
+  if (!tenant_id || !caller_phone) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // Find the lead by phone
+  const { data: lead, error: leadErr } = await supabase
+    .from('leads')
+    .select('id, name')
+    .eq('tenant_id', tenant_id)
+    .eq('phone', caller_phone)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (leadErr || !lead) {
+    return res.json({ success: false, message: 'No existing booking found for that number.' });
+  }
+
+  // Find their active appointment
+  const { data: appointment, error: apptErr } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('lead_id', lead.id)
+    .in('status', ['booked', 'rescheduled'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (apptErr || !appointment) {
+    return res.json({ success: false, message: 'No active appointment found to cancel.' });
+  }
+
+  await updateAppointmentStatus(appointment.id, 'cancelled');
+  await createEvent(tenant_id, lead.id, 'call_completed', { note: 'Appointment cancelled by caller' });
+
+  console.log(`[cancel] ${lead.name} cancelled appointment`);
+  return res.json({
+    success: true,
+    message: `Appointment for ${lead.name} has been cancelled.`,
+  });
+});
+
 // Creates a Retell web call session from the backend so the call_started
 // webhook fires and all dynamic variables are injected properly —
 // even during testing from the dashboard or an embedded widget.
