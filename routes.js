@@ -607,14 +607,35 @@ router.post('/functions/reschedule-appointment', async (req, res) => {
     return res.json({ success: false, message: 'No active appointment found to reschedule.' });
   }
 
-  // Build new scheduled_at
-  const timeHour = (new_time || '').toLowerCase().includes('afternoon') ? 14 : 9;
-  const scheduledAt = new Date(`${new_date}T${String(timeHour).padStart(2,'0')}:00:00`).toISOString();
+  // Build new scheduled_at — handle both HH:MM and morning/afternoon
+  let hour = 9;
+  if (new_time) {
+    const t = new_time.toLowerCase();
+    if (t.includes('afternoon')) {
+      hour = 14;
+    } else if (t.match(/^\d{1,2}:\d{2}/)) {
+      hour = parseInt(t.split(':')[0], 10);
+    }
+  }
+  const pad = n => String(n).padStart(2, '0');
+  const scheduledAt = `${new_date}T${pad(hour)}:00:00`;
 
-  // Update appointment
-  await updateAppointmentStatus(appointment.id, 'rescheduled');
-  await supabase.from('appointments').update({ scheduled_at: scheduledAt, status: 'rescheduled', updated_at: new Date().toISOString() }).eq('id', appointment.id);
-  await createEvent(tenant_id, lead.id, 'call_completed', { note: `Rescheduled to ${new_date} ${new_time}` });
+  // Update both status AND scheduled_at in one query
+  const { error: updateErr } = await supabase
+    .from('appointments')
+    .update({
+      scheduled_at: scheduledAt,
+      status: 'rescheduled',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', appointment.id);
+
+  if (updateErr) {
+    console.error('[reschedule] Failed to update appointment:', updateErr);
+    return res.json({ success: false, message: 'Failed to update appointment.' });
+  }
+
+  await createEvent(tenant_id, lead.id, 'call_completed', { note: `Rescheduled to ${new_date} at ${new_time}` });
 
   console.log(`[reschedule] ${lead.name} rescheduled to ${new_date} ${new_time}`);
   return res.json({
