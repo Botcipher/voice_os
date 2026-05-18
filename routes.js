@@ -553,8 +553,7 @@ router.post('/functions/book-appointment', async (req, res) => {
     }
   }
   const pad = n => String(n).padStart(2, '0');
-  // Build as UTC noon on the correct date to avoid any day shifting
-  const scheduledAt = `${preferred_date}T${pad(hour)}:00:00.000Z`;
+  const scheduledAt = `${preferred_date}T${pad(hour)}:00:00`;
 
   // Create appointment
   const { appointment } = await createAppointment(tenant_id, lead.id, scheduledAt);
